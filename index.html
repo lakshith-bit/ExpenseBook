@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExpenseBook - Expense & UPI Tracker</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="index.css">
+    <!-- Chart.js for Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- jsPDF for Excel-style Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <!-- SheetJS for Excel Import -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>ExpenseBook</h1>
+                <div class="header-actions">
+                    <button id="importExcelBtn" class="icon-btn" title="Import Excel"><i class="fa-solid fa-file-excel"></i></button>
+                    <input type="file" id="excelFileInput" accept=".xls,.xlsx,.csv" style="opacity: 0; position: absolute; left: -9999px; width: 0; height: 0;">
+                    <button id="manageCategoriesBtn" class="icon-btn" title="Manage Categories"><i class="fa-solid fa-tags"></i></button>
+                    <button id="exportPdfBtn" class="icon-btn" title="Export to PDF"><i class="fa-solid fa-file-pdf"></i></button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Dashboard / Summary Cards -->
+        <section class="dashboard">
+            <p id="lastUpdatedText" class="last-updated">Last updated on: -</p>
+            <div class="card balance-card">
+                <h3>Total Balance</h3>
+                <h2 id="totalBalance">₹0</h2>
+            </div>
+            <div class="stats-row">
+                <div class="card stat-card income">
+                    <div class="icon-wrapper"><i class="fa-solid fa-arrow-down"></i></div>
+                    <div>
+                        <p>Income</p>
+                        <h4 id="totalIncome">₹0</h4>
+                    </div>
+                </div>
+                <div class="card stat-card expense">
+                    <div class="icon-wrapper"><i class="fa-solid fa-arrow-up"></i></div>
+                    <div>
+                        <p>Expense</p>
+                        <h4 id="totalExpense">₹0</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="tabs-container">
+                <button class="tab-btn active" data-tab="listTab">Transactions</button>
+                <button class="tab-btn" data-tab="chartTab">Analytics</button>
+            </div>
+        </section>
+
+        <!-- Main Content -->
+        <section class="main-content-section">
+
+            <div class="section-header">
+                <div class="filter-group">
+                    <input type="text" id="filterSearch" class="select-input" placeholder="Search...">
+                    
+                    <div class="custom-multi-select" id="multiSelectContainer">
+                        <div class="select-input" id="multiSelectHeader">All Categories</div>
+                        <div class="multi-select-dropdown hidden" id="multiSelectDropdown">
+                            <!-- Checkboxes injected by JS -->
+                        </div>
+                    </div>
+
+                    <input type="text" id="filterStartDate" class="select-input" placeholder="Start Date" onclick="this.type='date'; if(this.showPicker) this.showPicker();" onblur="(this.value == '' ? this.type='text' : this.type='date')">
+                    <input type="text" id="filterEndDate" class="select-input" placeholder="End Date" onclick="this.type='date'; if(this.showPicker) this.showPicker();" onblur="(this.value == '' ? this.type='text' : this.type='date')">
+                    
+                    <select id="filterTxType" class="select-input" title="Transaction Type">
+                        <option value="all">All Types</option>
+                        <option value="income">Amount Received</option>
+                        <option value="expense">Amount Sent</option>
+                    </select>
+                    <select id="filterPaymentMethod" class="select-input" title="Payment Method">
+                        <option value="all">All Methods</option>
+                        <option value="UPI">UPI</option>
+                        <option value="Cash">Cash</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- List View -->
+            <div id="listTab" class="tab-content active">
+                <div id="transactionList" class="transaction-list">
+                    <!-- Transactions injected by JS -->
+                </div>
+            </div>
+
+            <!-- Chart View -->
+            <div id="chartTab" class="tab-content">
+                <div class="card chart-card" id="chartContainer" style="display: none;">
+                    <div id="noChartDataMsg" style="display: none; text-align: center; color: var(--text-secondary); padding: 3rem 0;">
+                        <i class="fa-solid fa-chart-pie" style="font-size: 3rem; opacity: 0.2; margin-bottom: 1rem; display: block;"></i>
+                        <p>No transactions available for the selected filters.</p>
+                    </div>
+                    <canvas id="expenseChart" height="300"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Floating Action Button -->
+        <button id="fabBtn" class="fab"><i class="fa-solid fa-plus"></i></button>
+    </div>
+
+    <!-- Modal: Add Transaction -->
+    <div id="transactionModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>New Transaction</h2>
+                <button class="close-btn" data-close="transactionModal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="transactionForm" class="modal-form">
+                <input type="hidden" id="txId">
+                <div class="type-toggle">
+                    <input type="radio" id="typeExpense" name="type" value="expense" checked>
+                    <label for="typeExpense">Expense</label>
+                    <input type="radio" id="typeIncome" name="type" value="income">
+                    <label for="typeIncome">Income</label>
+                </div>
+                <div class="type-toggle">
+                    <input type="radio" id="methodUPI" name="paymentMethod" value="UPI" checked>
+                    <label for="methodUPI">UPI</label>
+                    <input type="radio" id="methodCash" name="paymentMethod" value="Cash">
+                    <label for="methodCash">Cash</label>
+                </div>
+                <div class="form-group">
+                    <label>Amount (₹)</label>
+                    <input type="number" id="amount" required min="0" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="title" placeholder="e.g. Lunch at Canteen">
+                </div>
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="category" required>
+                        <!-- Categories injected by JS -->
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="date" required>
+                </div>
+                <button type="submit" class="btn primary-btn">Save Transaction</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Manage Categories -->
+    <div id="categoriesModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Categories</h2>
+                <button class="close-btn" data-close="categoriesModal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="addCategoryForm" class="flex-form">
+                    <input type="text" id="newCategoryName" required placeholder="New Category Name">
+                    <button type="submit" class="btn primary-btn btn-small"><i class="fa-solid fa-plus"></i></button>
+                </form>
+                <ul id="categoryList" class="category-list">
+                    <!-- Categories injected by JS -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay hidden" id="deleteConfirmModal">
+        <div class="modal" style="max-width: 400px; margin: auto;">
+            <div class="modal-header">
+                <h2>Delete Transaction</h2>
+                <button class="icon-btn" data-close="deleteConfirmModal"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Are you sure you want to delete this transaction? This action cannot be undone.</p>
+                <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn" style="background: var(--surface); border: 1px solid var(--border);" data-close="deleteConfirmModal">Cancel</button>
+                    <button type="button" class="btn" id="confirmDeleteBtn" style="background: #ef4444; color: white;">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

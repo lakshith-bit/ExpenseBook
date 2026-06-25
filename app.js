@@ -1,0 +1,818 @@
+let transactions = JSON.parse(localStorage.getItem('dukaan_transactions')) || [];
+let categories = JSON.parse(localStorage.getItem('dukaan_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
+let lastUpdated = localStorage.getItem('dukaan_last_updated') || null;
+
+// DOM Elements
+const totalBalanceEl = document.getElementById('totalBalance');
+const totalIncomeEl = document.getElementById('totalIncome');
+const totalExpenseEl = document.getElementById('totalExpense');
+const transactionListEl = document.getElementById('transactionList');
+const filterStartDateEl = document.getElementById('filterStartDate');
+const filterEndDateEl = document.getElementById('filterEndDate');
+const filterSearchEl = document.getElementById('filterSearch');
+const filterTxTypeEl = document.getElementById('filterTxType');
+const filterPaymentMethodEl = document.getElementById('filterPaymentMethod');
+const lastUpdatedEl = document.getElementById('lastUpdatedText');
+
+let expenseChartInstance = null;
+let selectedCategories = [];
+let currentFilteredTransactions = [];
+
+// Modals
+const categoriesModal = document.getElementById('categoriesModal');
+const deleteConfirmModal = document.getElementById('deleteConfirmModal');
+let transactionToDelete = null;
+
+// Init
+function init() {
+    updateDashboard();
+    renderTransactions();
+    populateCategoryDropdowns();
+    renderCategoryList();
+}
+
+// Event Listeners
+document.getElementById('fabBtn').addEventListener('click', () => {
+    document.getElementById('transactionForm').reset();
+    document.getElementById('txId').value = '';
+    openModal(transactionModal);
+});
+document.getElementById('manageCategoriesBtn').addEventListener('click', () => openModal(categoriesModal));
+
+document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const modalId = e.currentTarget.getAttribute('data-close');
+        closeModal(document.getElementById(modalId));
+    });
+});
+
+// Close modal on outside click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            closeModal(overlay);
+        }
+    });
+});
+
+// Filters
+filterSearchEl.addEventListener('input', renderTransactions);
+filterTxTypeEl.addEventListener('change', renderTransactions);
+filterPaymentMethodEl.addEventListener('change', renderTransactions);
+
+// Multi-Select Dropdown Logic
+const multiSelectContainer = document.getElementById('multiSelectContainer');
+const multiSelectHeader = document.getElementById('multiSelectHeader');
+const multiSelectDropdown = document.getElementById('multiSelectDropdown');
+
+multiSelectHeader.addEventListener('click', (e) => {
+    e.stopPropagation();
+    multiSelectDropdown.classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+    if (!multiSelectContainer.contains(e.target)) {
+        multiSelectDropdown.classList.add('hidden');
+    }
+});
+
+filterStartDateEl.addEventListener('change', () => {
+    if (filterStartDateEl.value) {
+        filterEndDateEl.min = filterStartDateEl.value;
+        if (filterEndDateEl.value && filterStartDateEl.value > filterEndDateEl.value) {
+            filterEndDateEl.value = filterStartDateEl.value;
+        }
+    } else {
+        filterEndDateEl.min = '';
+    }
+    renderTransactions();
+});
+
+filterEndDateEl.addEventListener('change', () => {
+    if (filterEndDateEl.value) {
+        filterStartDateEl.max = filterEndDateEl.value;
+        if (filterStartDateEl.value && filterStartDateEl.value > filterEndDateEl.value) {
+            filterStartDateEl.value = filterEndDateEl.value;
+        }
+    } else {
+        filterStartDateEl.max = '';
+    }
+    renderTransactions();
+});
+
+document.getElementById('exportPdfBtn').addEventListener('click', exportToPDF);
+
+// Tab Switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        btn.classList.add('active');
+        const targetTab = btn.getAttribute('data-tab');
+        document.getElementById(targetTab).classList.add('active');
+    });
+});
+
+// Add / Edit Transaction Form
+document.getElementById('transactionForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    const txId = document.getElementById('txId').value;
+    const type = document.querySelector('input[name="type"]:checked').value;
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+    const amount = parseFloat(document.getElementById('amount').value);
+    const rawTitle = document.getElementById('title').value.trim();
+    const category = document.getElementById('category').value;
+    const title = rawTitle || category;
+    const date = document.getElementById('date').value;
+
+    if (txId) {
+        // Edit existing
+        const index = transactions.findIndex(t => t.id === txId);
+        if (index > -1) {
+            transactions[index] = {
+                ...transactions[index],
+                type,
+                paymentMethod,
+                amount,
+                title,
+                category,
+                date
+            };
+        }
+    } else {
+        // Add new
+        transactions.push({
+            id: Date.now().toString(),
+            type,
+            paymentMethod,
+            amount,
+            title,
+            category,
+            date
+        });
+    }
+
+    saveTransactions();
+    
+    // Reset and close
+    e.target.reset();
+    document.getElementById('txId').value = '';
+    document.getElementById('date').valueAsDate = new Date(); // Reset to today
+    closeModal(transactionModal);
+    
+    renderTransactions();
+});
+
+// Add Category Form
+document.getElementById('addCategoryForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('newCategoryName');
+    const newCat = input.value.trim();
+    
+    if (newCat && !categories.includes(newCat)) {
+        categories.push(newCat);
+        saveCategories();
+        renderCategoryList();
+        populateCategoryDropdowns();
+        input.value = '';
+    }
+});
+
+// Helper Functions
+function openModal(modal) {
+    modal.classList.remove('hidden');
+    if (modal === transactionModal) {
+        // Set default date to today if empty
+        if (!document.getElementById('date').value) {
+            document.getElementById('date').valueAsDate = new Date();
+        }
+    }
+}
+
+function closeModal(modal) {
+    modal.classList.add('hidden');
+}
+
+function saveTransactions() {
+    // Sort by date descending before saving
+    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+    localStorage.setItem('dukaan_transactions', JSON.stringify(transactions));
+    
+    // Update last updated
+    lastUpdated = new Date().toLocaleString();
+    localStorage.setItem('dukaan_last_updated', lastUpdated);
+}
+
+function saveCategories() {
+    localStorage.setItem('dukaan_categories', JSON.stringify(categories));
+}
+
+
+
+function editTransaction(id) {
+    const tx = transactions.find(t => t.id === id);
+    if (!tx) return;
+
+    document.getElementById('txId').value = tx.id;
+    
+    // Set payment method, default to UPI if older transaction
+    const method = tx.paymentMethod || 'UPI';
+    if (method === 'UPI') {
+        document.getElementById('methodUPI').checked = true;
+        document.getElementById('methodCash').checked = false;
+    } else {
+        document.getElementById('methodCash').checked = true;
+        document.getElementById('methodUPI').checked = false;
+    }
+    
+    document.getElementById('amount').value = tx.amount;
+    document.getElementById('category').value = tx.category;
+    document.getElementById('date').value = tx.date;
+    
+    if (tx.type === 'income') {
+        document.getElementById('typeIncome').checked = true;
+    } else {
+        document.getElementById('typeExpense').checked = true;
+    }
+
+    openModal(transactionModal);
+}
+
+function deleteTransaction(id) {
+    transactionToDelete = id;
+    openModal(deleteConfirmModal);
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
+    if (transactionToDelete) {
+        transactions = transactions.filter(t => t.id !== transactionToDelete);
+        saveTransactions();
+        updateDashboard();
+        renderTransactions();
+        transactionToDelete = null;
+        closeModal(deleteConfirmModal);
+    }
+});
+
+function deleteCategory(cat) {
+    categories = categories.filter(c => c !== cat);
+    saveCategories();
+    renderCategoryList();
+    populateCategoryDropdowns();
+}
+
+function deleteNickname(index) {
+    nicknames.splice(index, 1);
+    saveNicknames();
+    renderNicknameList();
+    renderTransactions();
+}
+
+function updateDashboard(filteredTransactions = transactions) {
+    const totals = filteredTransactions.reduce((acc, curr) => {
+        if (curr.type === 'income') {
+            acc.income += curr.amount;
+            acc.balance += curr.amount;
+        } else {
+            acc.expense += curr.amount;
+            acc.balance -= curr.amount;
+        }
+        return acc;
+    }, { balance: 0, income: 0, expense: 0 });
+
+    totalBalanceEl.innerText = formatCurrency(totals.balance);
+    totalIncomeEl.innerText = formatCurrency(totals.income);
+    totalExpenseEl.innerText = formatCurrency(totals.expense);
+    
+    if (lastUpdated) {
+        lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+    }
+}
+
+
+
+function renderTransactions() {
+    transactionListEl.innerHTML = '';
+    
+    const startFilter = filterStartDateEl.value ? new Date(filterStartDateEl.value) : null;
+    const endFilter = filterEndDateEl.value ? new Date(filterEndDateEl.value) : null;
+    const searchFilter = filterSearchEl.value.toLowerCase().trim();
+    const typeFilter = filterTxTypeEl.value;
+    const methodFilter = filterPaymentMethodEl.value;
+
+    // Calculate absolute running balances from oldest to newest
+    const chronological = [...transactions].reverse();
+    let currentBal = 0;
+    chronological.forEach(tx => {
+        if (tx.type === 'income') {
+            currentBal += tx.amount;
+        } else {
+            currentBal -= tx.amount;
+        }
+        tx.runningBalance = currentBal;
+    });
+
+    const filtered = transactions.filter(t => {
+        const txDate = new Date(t.date);
+        
+        const matchCat = selectedCategories.length === 0 || selectedCategories.includes(t.category);
+        
+        const displayTitle = t.title;
+        const matchSearch = searchFilter === '' || 
+            displayTitle.toLowerCase().includes(searchFilter) || 
+            t.category.toLowerCase().includes(searchFilter);
+        
+        let matchStart = true;
+        if (startFilter) {
+            matchStart = txDate >= startFilter;
+        }
+        
+        let matchEnd = true;
+        if (endFilter) {
+            matchEnd = txDate <= endFilter;
+        }
+        
+        const safeTypeFilter = (typeFilter || '').trim().toLowerCase();
+        const matchType = safeTypeFilter === 'all' || safeTypeFilter === 'all types' || safeTypeFilter === '' || t.type === typeFilter;
+        
+        // Default older transactions to UPI for filtering
+        const txMethod = t.paymentMethod || 'UPI';
+        const safeMethodFilter = (methodFilter || '').trim().toLowerCase();
+        const matchMethod = safeMethodFilter === 'all' || safeMethodFilter === 'all methods' || safeMethodFilter === '' || txMethod === methodFilter;
+        
+        return matchCat && matchStart && matchEnd && matchSearch && matchType && matchMethod;
+    });
+    
+    currentFilteredTransactions = filtered;
+
+    // Update dashboard based on filtered results
+    updateDashboard(filtered);
+    renderChart(filtered);
+
+    if (filtered.length === 0) {
+        transactionListEl.innerHTML = `
+            <div class="empty-state">
+                <i class="fa-solid fa-receipt"></i>
+                <p>No transactions found.</p>
+            </div>
+        `;
+        return;
+    }
+
+    filtered.forEach(tx => {
+        const isIncome = tx.type === 'income';
+        const sign = isIncome ? '+' : '-';
+        
+        const dateObj = new Date(tx.date);
+        const day = dateObj.getDate();
+        const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
+        const year = dateObj.getFullYear();
+        const formattedDate = `${day} ${month} ${year}`;
+        
+        const displayTitle = tx.title;
+        const runningBalStr = tx.runningBalance !== undefined ? formatCurrency(tx.runningBalance) : '';
+        const txMethod = tx.paymentMethod || 'UPI';
+        const methodIcon = txMethod === 'Cash' ? '<i class="fa-solid fa-money-bill"></i>' : '<i class="fa-brands fa-google-pay"></i>';
+
+        const item = document.createElement('div');
+        item.className = 'transaction-item';
+        item.innerHTML = `
+            <div class="tx-row tx-header-row">
+                <span class="tx-date">${formattedDate}</span>
+                <span class="tx-amount ${tx.type}">${sign}${formatCurrency(tx.amount)}</span>
+            </div>
+            <div class="tx-row tx-body-row">
+                <div class="tx-title-group">
+                    <h4>${displayTitle}</h4>
+                    <span class="tx-category-badge" title="Original: ${tx.title}">
+                        <i class="fa-solid fa-tag" style="margin-right: 4px;"></i>${tx.category} &nbsp;|&nbsp; ${methodIcon} ${txMethod}
+                    </span>
+                </div>
+                <div class="tx-balance-group">
+                    <div class="tx-running-bal">Bal: ${runningBalStr}</div>
+                </div>
+            </div>
+            <div class="tx-row tx-footer-row" style="justify-content: flex-end;">
+                <div class="tx-actions">
+                    <button class="edit-btn" onclick="editTransaction('${tx.id}')" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                    <button class="delete-btn" onclick="deleteTransaction('${tx.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>
+        `;
+        transactionListEl.appendChild(item);
+    });
+}
+
+function renderCategoryList() {
+    const list = document.getElementById('categoryList');
+    list.innerHTML = '';
+    categories.forEach(cat => {
+        const li = document.createElement('li');
+        li.className = 'category-item';
+        li.innerHTML = `
+            <span>${cat}</span>
+            <button onclick="deleteCategory('${cat}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+        `;
+        list.appendChild(li);
+    });
+}
+
+
+function populateCategoryDropdowns() {
+    const formSelect = document.getElementById('category');
+    
+    formSelect.innerHTML = '';
+    categories.forEach(cat => {
+        formSelect.add(new Option(cat, cat));
+    });
+
+    // Populate custom multi-select
+    const multiSelectDropdown = document.getElementById('multiSelectDropdown');
+    multiSelectDropdown.innerHTML = '';
+    
+    // Ensure selected categories only contain valid existing categories
+    selectedCategories = selectedCategories.filter(c => categories.includes(c));
+
+    categories.forEach(cat => {
+        const isChecked = selectedCategories.includes(cat) ? 'checked' : '';
+        const div = document.createElement('label');
+        div.className = 'multi-select-option';
+        div.innerHTML = `<input type="checkbox" value="${cat}" ${isChecked}> ${cat}`;
+        
+        div.querySelector('input').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                if (!selectedCategories.includes(cat)) selectedCategories.push(cat);
+            } else {
+                selectedCategories = selectedCategories.filter(c => c !== cat);
+            }
+            updateMultiSelectHeader();
+            renderTransactions();
+        });
+        
+        multiSelectDropdown.appendChild(div);
+    });
+    
+    updateMultiSelectHeader();
+}
+
+function updateMultiSelectHeader() {
+    const header = document.getElementById('multiSelectHeader');
+    if (selectedCategories.length === 0) {
+        header.innerText = 'All Categories';
+    } else if (selectedCategories.length === 1) {
+        header.innerText = selectedCategories[0];
+    } else {
+        header.innerText = `${selectedCategories.length} Categories Selected`;
+    }
+}
+
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+    }).format(amount);
+}
+
+function getCategoryIcon(category) {
+    const catMap = {
+        'Food': '<i class="fa-solid fa-burger"></i>',
+        'Personal': '<i class="fa-solid fa-user"></i>',
+        'Transport': '<i class="fa-solid fa-car"></i>',
+        'Utilities': '<i class="fa-solid fa-bolt"></i>',
+        'Entertainment': '<i class="fa-solid fa-film"></i>',
+        'Salary': '<i class="fa-solid fa-wallet"></i>'
+    };
+    return catMap[category] || '<i class="fa-solid fa-tag"></i>';
+}
+
+function renderChart(filteredTransactions) {
+    const chartContainer = document.getElementById('chartContainer');
+    const noDataMsg = document.getElementById('noChartDataMsg');
+    const canvas = document.getElementById('expenseChart');
+    
+    // Aggregate by category for all currently filtered transactions
+    const chartData = {};
+    let totalAmount = 0;
+    
+    filteredTransactions.forEach(tx => {
+        chartData[tx.category] = (chartData[tx.category] || 0) + tx.amount;
+        totalAmount += tx.amount;
+    });
+
+    // If no data, show the empty state message and hide the canvas
+    if (totalAmount === 0) {
+        chartContainer.style.display = 'block';
+        if (noDataMsg) noDataMsg.style.display = 'block';
+        if (canvas) canvas.style.display = 'none';
+        return;
+    }
+    
+    chartContainer.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
+    if (canvas) canvas.style.display = 'block';
+    
+    const labels = Object.keys(chartData);
+    const data = Object.values(chartData);
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Premium dark mode colors
+    const colors = [
+        '#ef4444', '#3b82f6', '#10b981', '#f59e0b',
+        '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
+    ];
+    
+    if (expenseChartInstance) {
+        expenseChartInstance.data.labels = labels;
+        expenseChartInstance.data.datasets[0].data = data;
+        expenseChartInstance.data.datasets[0].backgroundColor = colors.slice(0, labels.length);
+        expenseChartInstance.update();
+        return;
+    }
+    
+    expenseChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: colors.slice(0, labels.length),
+                borderWidth: 2,
+                borderColor: '#0b0f19' // Match --bg-color
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#f8fafc', // Match --text-primary
+                        font: {
+                            family: "'Outfit', sans-serif",
+                            size: 13
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                    titleFont: { family: "'Outfit', sans-serif" },
+                    bodyFont: { family: "'Outfit', sans-serif" },
+                    callbacks: {
+                        label: function(context) {
+                            return ' ' + formatCurrency(context.raw);
+                        }
+                    }
+                }
+            },
+            cutout: '70%'
+        }
+    });
+}
+
+function exportToPDF() {
+    if (currentFilteredTransactions.length === 0) {
+        alert("No transactions to export.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(15, 23, 42); // Dark slate
+    doc.text("ExpenseBook Statement", 14, 22);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+    // Calculate balances based on current filtered view
+    const sortedTxs = [...currentFilteredTransactions].sort((a, b) => new Date(a.date) - new Date(b.date)); // Oldest first
+    
+    const closingBalance = sortedTxs[sortedTxs.length - 1].runningBalance;
+    const firstTx = sortedTxs[0];
+    let openingBalance = firstTx.runningBalance;
+    if (firstTx.type === 'income') {
+        openingBalance -= firstTx.amount;
+    } else {
+        openingBalance += firstTx.amount;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Opening Balance: Rs. ${openingBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, 14, 42);
+    doc.text(`Closing Balance: Rs. ${closingBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, 110, 42);
+
+    const tableColumn = ["Date", "Title", "Category", "Method", "Type", "Amount"];
+    const tableRows = [];
+
+    // Reverse back to newest first for display
+    sortedTxs.reverse().forEach(tx => {
+        const rowData = [
+            new Date(tx.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            tx.title,
+            tx.category,
+            tx.paymentMethod || 'UPI',
+            tx.type.charAt(0).toUpperCase() + tx.type.slice(1),
+            (tx.type === 'income' ? '+' : '-') + ' Rs. ' + tx.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})
+        ];
+        tableRows.push(rowData);
+    });
+
+    doc.autoTable({
+        head: [tableColumn],
+        body: tableRows,
+        startY: 50,
+        theme: 'striped',
+        styles: { font: 'helvetica', fontSize: 10 },
+        headStyles: { fillColor: [15, 23, 42], textColor: 255 },
+        alternateRowStyles: { fillColor: [241, 245, 249] },
+        columnStyles: {
+            5: { halign: 'right', fontStyle: 'bold' }
+        },
+        didParseCell: function(data) {
+            if (data.section === 'body' && data.column.index === 5) {
+                if (data.cell.raw.includes('+')) {
+                    data.cell.styles.textColor = [16, 185, 129]; // Green
+                } else if (data.cell.raw.includes('-')) {
+                    data.cell.styles.textColor = [239, 68, 68]; // Red
+                }
+            }
+        }
+    });
+
+    doc.save(`ExpenseBook_Statement_${new Date().toISOString().split('T')[0]}.pdf`);
+}
+
+// Excel Import Logic
+document.getElementById('importExcelBtn').addEventListener('click', () => {
+    document.getElementById('excelFileInput').click();
+});
+
+document.getElementById('excelFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Use header: 1 to get an array of arrays, so we can find the actual header row
+            const rows = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+            
+            if (!categories.includes('Uncategorized')) {
+                categories.push('Uncategorized');
+                saveCategories();
+                populateCategoryDropdowns();
+            }
+
+            let headerRowIndex = -1;
+            let colMap = { date: -1, title: -1, withdrawal: -1, deposit: -1, amount: -1 };
+
+            // Scan the first 50 rows to find the header row
+            for (let i = 0; i < Math.min(rows.length, 50); i++) {
+                const row = rows[i];
+                if (!row || !Array.isArray(row)) continue;
+                
+                let foundDate = false;
+                let foundTitle = false;
+                
+                row.forEach((cell, index) => {
+                    if (typeof cell !== 'string') return;
+                    const lower = cell.toLowerCase().trim();
+                    if (lower.includes('date')) { colMap.date = index; foundDate = true; }
+                    else if (lower.includes('narration') || lower.includes('description') || lower.includes('particulars') || lower === 'title') { colMap.title = index; foundTitle = true; }
+                    else if (lower.includes('withdrawal') || lower.includes('debit') || lower.includes('expense') || lower.includes('sent')) colMap.withdrawal = index;
+                    else if (lower.includes('deposit') || lower.includes('credit') || lower.includes('income') || lower.includes('received')) colMap.deposit = index;
+                    else if (lower.includes('amount')) colMap.amount = index;
+                });
+                
+                if (foundDate && foundTitle) {
+                    headerRowIndex = i;
+                    break;
+                }
+            }
+
+            if (headerRowIndex === -1) {
+                alert("Could not find the header row. Please ensure your file has columns for 'Date' and 'Narration' or 'Title'.");
+                return;
+            }
+
+            let importedCount = 0;
+
+            for (let i = headerRowIndex + 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0) continue;
+                
+                const dateStr = row[colMap.date];
+                const title = row[colMap.title];
+                
+                if (!dateStr || !title) continue; // skip invalid rows
+                
+                let withdrawal = colMap.withdrawal !== -1 ? parseFloat(row[colMap.withdrawal]) : NaN;
+                let deposit = colMap.deposit !== -1 ? parseFloat(row[colMap.deposit]) : NaN;
+                
+                if (isNaN(withdrawal)) withdrawal = 0;
+                if (isNaN(deposit)) deposit = 0;
+                
+                // Fallback for amounts if there's just one 'Amount' column
+                if (withdrawal === 0 && deposit === 0 && colMap.amount !== -1) {
+                    let amt = parseFloat(row[colMap.amount]);
+                    if (!isNaN(amt)) {
+                        if (amt < 0) { withdrawal = Math.abs(amt); }
+                        else { deposit = amt; }
+                    }
+                }
+
+                let parsedDate;
+                if (typeof dateStr === 'number') {
+                    // Excel date serial number. Excel dates represent local midnight.
+                    let utcMs = Math.round((dateStr - 25569) * 86400 * 1000);
+                    let tempDate = new Date(utcMs);
+                    // Add timezone offset to force it to local midnight
+                    parsedDate = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
+                } else {
+                    let str = String(dateStr).trim();
+                    const parts = str.split(/[-/]/);
+                    if (parts.length === 3) {
+                        if (parts[0].length === 4) {
+                            // Format: YYYY-MM-DD
+                            let year = parseInt(parts[0]);
+                            let month = parseInt(parts[1]) - 1;
+                            let day = parseInt(parts[2]);
+                            parsedDate = new Date(year, month, day);
+                        } else if (!isNaN(parts[1])) {
+                            // Format: DD/MM/YYYY
+                            let day = parseInt(parts[0]);
+                            let month = parseInt(parts[1]) - 1;
+                            let year = parseInt(parts[2]);
+                            if (year < 100) year += 2000;
+                            parsedDate = new Date(year, month, day);
+                        } else {
+                            parsedDate = new Date(str);
+                        }
+                    } else {
+                        parsedDate = new Date(str);
+                    }
+                }
+                
+                if (isNaN(parsedDate.getTime())) parsedDate = new Date();
+
+                // Build ISO string in Local Time to prevent 1-day timezone shifting
+                const yearStr = parsedDate.getFullYear();
+                const monthStr = String(parsedDate.getMonth() + 1).padStart(2, '0');
+                const dayStr = String(parsedDate.getDate()).padStart(2, '0');
+                const isoDate = `${yearStr}-${monthStr}-${dayStr}`;
+
+                let type = 'expense';
+                let finalAmount = withdrawal || 0;
+                if (deposit && deposit > 0) {
+                    type = 'income';
+                    finalAmount = deposit;
+                }
+
+                if (finalAmount <= 0) continue;
+
+                transactions.push({
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                    type: type,
+                    paymentMethod: 'UPI',
+                    amount: finalAmount,
+                    title: String(title),
+                    category: 'Uncategorized',
+                    date: isoDate
+                });
+                importedCount++;
+            }
+
+            if (importedCount > 0) {
+                saveTransactions();
+                updateDashboard();
+                renderTransactions();
+                alert(`Successfully imported ${importedCount} transactions!`);
+            } else {
+                alert("No valid transactions found in the file. Ensure the amount and date columns contain valid data.");
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Error parsing the Excel file. Please ensure it is a valid format.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = ''; // reset
+});
+
+// Start
+init();
