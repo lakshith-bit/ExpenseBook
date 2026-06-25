@@ -1,6 +1,6 @@
-let transactions = JSON.parse(localStorage.getItem('dukaan_transactions')) || [];
-let categories = JSON.parse(localStorage.getItem('dukaan_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
-let lastUpdated = localStorage.getItem('dukaan_last_updated') || null;
+let transactions = JSON.parse(localStorage.getItem('expensebook_transactions')) || [];
+let categories = JSON.parse(localStorage.getItem('expensebook_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
+let lastUpdated = localStorage.getItem('expensebook_last_updated') || null;
 
 // DOM Elements
 const totalBalanceEl = document.getElementById('totalBalance');
@@ -107,7 +107,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        
+
         btn.classList.add('active');
         const targetTab = btn.getAttribute('data-tab');
         document.getElementById(targetTab).classList.add('active');
@@ -117,7 +117,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 // Add / Edit Transaction Form
 document.getElementById('transactionForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    
+
     const txId = document.getElementById('txId').value;
     const type = document.querySelector('input[name="type"]:checked').value;
     const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
@@ -155,13 +155,13 @@ document.getElementById('transactionForm').addEventListener('submit', (e) => {
     }
 
     saveTransactions();
-    
+
     // Reset and close
     e.target.reset();
     document.getElementById('txId').value = '';
     document.getElementById('date').valueAsDate = new Date(); // Reset to today
     closeModal(transactionModal);
-    
+
     renderTransactions();
 });
 
@@ -170,7 +170,7 @@ document.getElementById('addCategoryForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = document.getElementById('newCategoryName');
     const newCat = input.value.trim();
-    
+
     if (newCat && !categories.includes(newCat)) {
         categories.push(newCat);
         saveCategories();
@@ -198,15 +198,15 @@ function closeModal(modal) {
 function saveTransactions() {
     // Sort by date descending before saving
     transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-    localStorage.setItem('dukaan_transactions', JSON.stringify(transactions));
-    
+    localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+
     // Update last updated
     lastUpdated = new Date().toLocaleString();
-    localStorage.setItem('dukaan_last_updated', lastUpdated);
+    localStorage.setItem('expensebook_last_updated', lastUpdated);
 }
 
 function saveCategories() {
-    localStorage.setItem('dukaan_categories', JSON.stringify(categories));
+    localStorage.setItem('expensebook_categories', JSON.stringify(categories));
 }
 
 
@@ -216,7 +216,7 @@ function editTransaction(id) {
     if (!tx) return;
 
     document.getElementById('txId').value = tx.id;
-    
+
     // Set payment method, default to UPI if older transaction
     const method = tx.paymentMethod || 'UPI';
     if (method === 'UPI') {
@@ -226,11 +226,11 @@ function editTransaction(id) {
         document.getElementById('methodCash').checked = true;
         document.getElementById('methodUPI').checked = false;
     }
-    
+
     document.getElementById('amount').value = tx.amount;
     document.getElementById('category').value = tx.category;
     document.getElementById('date').value = tx.date;
-    
+
     if (tx.type === 'income') {
         document.getElementById('typeIncome').checked = true;
     } else {
@@ -285,7 +285,7 @@ function updateDashboard(filteredTransactions = transactions) {
     totalBalanceEl.innerText = formatCurrency(totals.balance);
     totalIncomeEl.innerText = formatCurrency(totals.income);
     totalExpenseEl.innerText = formatCurrency(totals.expense);
-    
+
     if (lastUpdated) {
         lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
     }
@@ -295,7 +295,7 @@ function updateDashboard(filteredTransactions = transactions) {
 
 function renderTransactions() {
     transactionListEl.innerHTML = '';
-    
+
     const startFilter = filterStartDateEl.value ? new Date(filterStartDateEl.value) : null;
     const endFilter = filterEndDateEl.value ? new Date(filterEndDateEl.value) : null;
     const searchFilter = filterSearchEl.value.toLowerCase().trim();
@@ -316,35 +316,35 @@ function renderTransactions() {
 
     const filtered = transactions.filter(t => {
         const txDate = new Date(t.date);
-        
+
         const matchCat = selectedCategories.length === 0 || selectedCategories.includes(t.category);
-        
+
         const displayTitle = t.title;
-        const matchSearch = searchFilter === '' || 
-            displayTitle.toLowerCase().includes(searchFilter) || 
+        const matchSearch = searchFilter === '' ||
+            displayTitle.toLowerCase().includes(searchFilter) ||
             t.category.toLowerCase().includes(searchFilter);
-        
+
         let matchStart = true;
         if (startFilter) {
             matchStart = txDate >= startFilter;
         }
-        
+
         let matchEnd = true;
         if (endFilter) {
             matchEnd = txDate <= endFilter;
         }
-        
+
         const safeTypeFilter = (typeFilter || '').trim().toLowerCase();
         const matchType = safeTypeFilter === 'all' || safeTypeFilter === 'all types' || safeTypeFilter === '' || t.type === typeFilter;
-        
+
         // Default older transactions to UPI for filtering
         const txMethod = t.paymentMethod || 'UPI';
         const safeMethodFilter = (methodFilter || '').trim().toLowerCase();
         const matchMethod = safeMethodFilter === 'all' || safeMethodFilter === 'all methods' || safeMethodFilter === '' || txMethod === methodFilter;
-        
+
         return matchCat && matchStart && matchEnd && matchSearch && matchType && matchMethod;
     });
-    
+
     currentFilteredTransactions = filtered;
 
     // Update dashboard based on filtered results
@@ -364,13 +364,13 @@ function renderTransactions() {
     filtered.forEach(tx => {
         const isIncome = tx.type === 'income';
         const sign = isIncome ? '+' : '-';
-        
+
         const dateObj = new Date(tx.date);
         const day = dateObj.getDate();
         const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
         const year = dateObj.getFullYear();
         const formattedDate = `${day} ${month} ${year}`;
-        
+
         const displayTitle = tx.title;
         const runningBalStr = tx.runningBalance !== undefined ? formatCurrency(tx.runningBalance) : '';
         const txMethod = tx.paymentMethod || 'UPI';
@@ -422,7 +422,7 @@ function renderCategoryList() {
 
 function populateCategoryDropdowns() {
     const formSelect = document.getElementById('category');
-    
+
     formSelect.innerHTML = '';
     categories.forEach(cat => {
         formSelect.add(new Option(cat, cat));
@@ -431,7 +431,7 @@ function populateCategoryDropdowns() {
     // Populate custom multi-select
     const multiSelectDropdown = document.getElementById('multiSelectDropdown');
     multiSelectDropdown.innerHTML = '';
-    
+
     // Ensure selected categories only contain valid existing categories
     selectedCategories = selectedCategories.filter(c => categories.includes(c));
 
@@ -440,7 +440,7 @@ function populateCategoryDropdowns() {
         const div = document.createElement('label');
         div.className = 'multi-select-option';
         div.innerHTML = `<input type="checkbox" value="${cat}" ${isChecked}> ${cat}`;
-        
+
         div.querySelector('input').addEventListener('change', (e) => {
             if (e.target.checked) {
                 if (!selectedCategories.includes(cat)) selectedCategories.push(cat);
@@ -450,10 +450,10 @@ function populateCategoryDropdowns() {
             updateMultiSelectHeader();
             renderTransactions();
         });
-        
+
         multiSelectDropdown.appendChild(div);
     });
-    
+
     updateMultiSelectHeader();
 }
 
@@ -493,11 +493,11 @@ function renderChart(filteredTransactions) {
     const chartContainer = document.getElementById('chartContainer');
     const noDataMsg = document.getElementById('noChartDataMsg');
     const canvas = document.getElementById('expenseChart');
-    
+
     // Aggregate by category for all currently filtered transactions
     const chartData = {};
     let totalAmount = 0;
-    
+
     filteredTransactions.forEach(tx => {
         chartData[tx.category] = (chartData[tx.category] || 0) + tx.amount;
         totalAmount += tx.amount;
@@ -510,22 +510,22 @@ function renderChart(filteredTransactions) {
         if (canvas) canvas.style.display = 'none';
         return;
     }
-    
+
     chartContainer.style.display = 'block';
     if (noDataMsg) noDataMsg.style.display = 'none';
     if (canvas) canvas.style.display = 'block';
-    
+
     const labels = Object.keys(chartData);
     const data = Object.values(chartData);
-    
+
     const ctx = canvas.getContext('2d');
-    
+
     // Premium dark mode colors
     const colors = [
         '#ef4444', '#3b82f6', '#10b981', '#f59e0b',
         '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
     ];
-    
+
     if (expenseChartInstance) {
         expenseChartInstance.data.labels = labels;
         expenseChartInstance.data.datasets[0].data = data;
@@ -533,7 +533,7 @@ function renderChart(filteredTransactions) {
         expenseChartInstance.update();
         return;
     }
-    
+
     expenseChartInstance = new Chart(ctx, {
         type: 'doughnut',
         data: {
@@ -564,7 +564,7 @@ function renderChart(filteredTransactions) {
                     titleFont: { family: "'Outfit', sans-serif" },
                     bodyFont: { family: "'Outfit', sans-serif" },
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             return ' ' + formatCurrency(context.raw);
                         }
                     }
@@ -588,7 +588,7 @@ function exportToPDF() {
     doc.setFontSize(18);
     doc.setTextColor(15, 23, 42); // Dark slate
     doc.text("ExpenseBook Statement", 14, 22);
-    
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     doc.setTextColor(100);
@@ -596,7 +596,7 @@ function exportToPDF() {
 
     // Calculate balances based on current filtered view
     const sortedTxs = [...currentFilteredTransactions].sort((a, b) => new Date(a.date) - new Date(b.date)); // Oldest first
-    
+
     const closingBalance = sortedTxs[sortedTxs.length - 1].runningBalance;
     const firstTx = sortedTxs[0];
     let openingBalance = firstTx.runningBalance;
@@ -608,8 +608,8 @@ function exportToPDF() {
 
     doc.setFont("helvetica", "bold");
     doc.setTextColor(15, 23, 42);
-    doc.text(`Opening Balance: Rs. ${openingBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, 14, 42);
-    doc.text(`Closing Balance: Rs. ${closingBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, 110, 42);
+    doc.text(`Opening Balance: Rs. ${openingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 14, 42);
+    doc.text(`Closing Balance: Rs. ${closingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 110, 42);
 
     const tableColumn = ["Date", "Title", "Category", "Method", "Type", "Amount"];
     const tableRows = [];
@@ -622,7 +622,7 @@ function exportToPDF() {
             tx.category,
             tx.paymentMethod || 'UPI',
             tx.type.charAt(0).toUpperCase() + tx.type.slice(1),
-            (tx.type === 'income' ? '+' : '-') + ' Rs. ' + tx.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})
+            (tx.type === 'income' ? '+' : '-') + ' Rs. ' + tx.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })
         ];
         tableRows.push(rowData);
     });
@@ -638,7 +638,7 @@ function exportToPDF() {
         columnStyles: {
             5: { halign: 'right', fontStyle: 'bold' }
         },
-        didParseCell: function(data) {
+        didParseCell: function (data) {
             if (data.section === 'body' && data.column.index === 5) {
                 if (data.cell.raw.includes('+')) {
                     data.cell.styles.textColor = [16, 185, 129]; // Green
@@ -657,21 +657,21 @@ document.getElementById('importExcelBtn').addEventListener('click', () => {
     document.getElementById('excelFileInput').click();
 });
 
-document.getElementById('excelFileInput').addEventListener('change', function(e) {
+document.getElementById('excelFileInput').addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = function (e) {
         try {
             const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
+            const workbook = XLSX.read(data, { type: 'array' });
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
-            
+
             // Use header: 1 to get an array of arrays, so we can find the actual header row
-            const rows = XLSX.utils.sheet_to_json(worksheet, {header: 1});
-            
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
             if (!categories.includes('Uncategorized')) {
                 categories.push('Uncategorized');
                 saveCategories();
@@ -685,10 +685,10 @@ document.getElementById('excelFileInput').addEventListener('change', function(e)
             for (let i = 0; i < Math.min(rows.length, 50); i++) {
                 const row = rows[i];
                 if (!row || !Array.isArray(row)) continue;
-                
+
                 let foundDate = false;
                 let foundTitle = false;
-                
+
                 row.forEach((cell, index) => {
                     if (typeof cell !== 'string') return;
                     const lower = cell.toLowerCase().trim();
@@ -698,7 +698,7 @@ document.getElementById('excelFileInput').addEventListener('change', function(e)
                     else if (lower.includes('deposit') || lower.includes('credit') || lower.includes('income') || lower.includes('received')) colMap.deposit = index;
                     else if (lower.includes('amount')) colMap.amount = index;
                 });
-                
+
                 if (foundDate && foundTitle) {
                     headerRowIndex = i;
                     break;
@@ -715,18 +715,18 @@ document.getElementById('excelFileInput').addEventListener('change', function(e)
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row || row.length === 0) continue;
-                
+
                 const dateStr = row[colMap.date];
                 const title = row[colMap.title];
-                
+
                 if (!dateStr || !title) continue; // skip invalid rows
-                
+
                 let withdrawal = colMap.withdrawal !== -1 ? parseFloat(row[colMap.withdrawal]) : NaN;
                 let deposit = colMap.deposit !== -1 ? parseFloat(row[colMap.deposit]) : NaN;
-                
+
                 if (isNaN(withdrawal)) withdrawal = 0;
                 if (isNaN(deposit)) deposit = 0;
-                
+
                 // Fallback for amounts if there's just one 'Amount' column
                 if (withdrawal === 0 && deposit === 0 && colMap.amount !== -1) {
                     let amt = parseFloat(row[colMap.amount]);
@@ -767,7 +767,7 @@ document.getElementById('excelFileInput').addEventListener('change', function(e)
                         parsedDate = new Date(str);
                     }
                 }
-                
+
                 if (isNaN(parsedDate.getTime())) parsedDate = new Date();
 
                 // Build ISO string in Local Time to prevent 1-day timezone shifting
