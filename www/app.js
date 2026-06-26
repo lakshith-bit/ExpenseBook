@@ -1,6 +1,15 @@
+let accounts = JSON.parse(localStorage.getItem('expensebook_accounts')) || [{ id: 'acc_default', name: 'Personal' }];
+let activeAccountId = localStorage.getItem('expensebook_active_account') || 'acc_default';
+
 let transactions = JSON.parse(localStorage.getItem('expensebook_transactions')) || [];
 let categories = JSON.parse(localStorage.getItem('expensebook_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
 let lastUpdated = localStorage.getItem('expensebook_last_updated') || null;
+
+// Migration: Assign existing transactions to default account
+transactions.forEach(t => {
+    if (!t.accountId) t.accountId = 'acc_default';
+});
+localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
 
 // DOM Elements
 const totalBalanceEl = document.getElementById('totalBalance');
@@ -13,6 +22,7 @@ const filterSearchEl = document.getElementById('filterSearch');
 const filterTxTypeEl = document.getElementById('filterTxType');
 const filterPaymentMethodEl = document.getElementById('filterPaymentMethod');
 const lastUpdatedEl = document.getElementById('lastUpdatedText');
+const accountSelector = document.getElementById('accountSelector');
 
 let expenseChartInstance = null;
 let selectedCategories = [];
@@ -20,15 +30,18 @@ let currentFilteredTransactions = [];
 
 // Modals
 const categoriesModal = document.getElementById('categoriesModal');
+const accountsModal = document.getElementById('accountsModal');
 const deleteConfirmModal = document.getElementById('deleteConfirmModal');
 let transactionToDelete = null;
 
 // Init
 function init() {
+    populateAccountSelector();
     updateDashboard();
     renderTransactions();
     populateCategoryDropdowns();
     renderCategoryList();
+    renderAccountList();
 }
 
 // Event Listeners
@@ -38,6 +51,14 @@ document.getElementById('fabBtn').addEventListener('click', () => {
     openModal(transactionModal);
 });
 document.getElementById('manageCategoriesBtn').addEventListener('click', () => openModal(categoriesModal));
+document.getElementById('manageAccountsBtn').addEventListener('click', () => openModal(accountsModal));
+
+accountSelector.addEventListener('change', (e) => {
+    activeAccountId = e.target.value;
+    localStorage.setItem('expensebook_active_account', activeAccountId);
+    updateDashboard();
+    renderTransactions();
+});
 
 document.querySelectorAll('[data-close]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -145,6 +166,7 @@ document.getElementById('transactionForm').addEventListener('submit', (e) => {
         // Add new
         transactions.push({
             id: Date.now().toString(),
+            accountId: activeAccountId,
             type,
             paymentMethod,
             amount,
@@ -180,6 +202,30 @@ document.getElementById('addCategoryForm').addEventListener('submit', (e) => {
     }
 });
 
+// Add Account Form
+document.getElementById('addAccountForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('newAccountName');
+    const newName = input.value.trim();
+
+    if (newName) {
+        const newId = 'acc_' + Date.now();
+        accounts.push({ id: newId, name: newName });
+        saveAccounts();
+        renderAccountList();
+        populateAccountSelector();
+        
+        // Auto-switch to new account
+        activeAccountId = newId;
+        localStorage.setItem('expensebook_active_account', activeAccountId);
+        accountSelector.value = activeAccountId;
+        updateDashboard();
+        renderTransactions();
+        
+        input.value = '';
+    }
+});
+
 // Helper Functions
 function openModal(modal) {
     modal.classList.remove('hidden');
@@ -196,8 +242,14 @@ function closeModal(modal) {
 }
 
 function saveTransactions() {
-    // Sort by date descending before saving
-    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Sort by date descending, then by transaction ID descending (newest first)
+    transactions.sort((a, b) => {
+        const dateDiff = new Date(b.date) - new Date(a.date);
+        if (dateDiff === 0) {
+            return b.id.localeCompare(a.id);
+        }
+        return dateDiff;
+    });
     localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
 
     // Update last updated
@@ -302,8 +354,10 @@ function renderTransactions() {
     const typeFilter = filterTxTypeEl.value;
     const methodFilter = filterPaymentMethodEl.value;
 
-    // Calculate absolute running balances from oldest to newest
-    const chronological = [...transactions].reverse();
+    const activeTransactions = transactions.filter(t => t.accountId === activeAccountId);
+
+    // Calculate absolute running balances from oldest to newest for active account
+    const chronological = [...activeTransactions].reverse();
     let currentBal = 0;
     chronological.forEach(tx => {
         if (tx.type === 'income') {
@@ -314,7 +368,7 @@ function renderTransactions() {
         tx.runningBalance = currentBal;
     });
 
-    const filtered = transactions.filter(t => {
+    const filtered = activeTransactions.filter(t => {
         const txDate = new Date(t.date);
 
         const matchCat = selectedCategories.length === 0 || selectedCategories.includes(t.category);
@@ -419,6 +473,53 @@ function renderCategoryList() {
     });
 }
 
+function saveAccounts() {
+    localStorage.setItem('expensebook_accounts', JSON.stringify(accounts));
+}
+
+function renderAccountList() {
+    const list = document.getElementById('accountList');
+    if (!list) return;
+    list.innerHTML = '';
+    accounts.forEach(acc => {
+        const li = document.createElement('li');
+        li.className = 'category-item';
+        li.innerHTML = `
+            <span>${acc.name} ${acc.id === 'acc_default' ? '(Default)' : ''}</span>
+            ${acc.id !== 'acc_default' ? `<button type="button" onclick="deleteAccount('${acc.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>` : '<span></span>'}
+        `;
+        list.appendChild(li);
+    });
+}
+
+function populateAccountSelector() {
+    if (!accountSelector) return;
+    accountSelector.innerHTML = '';
+    accounts.forEach(acc => {
+        accountSelector.add(new Option(acc.name, acc.id));
+    });
+    accountSelector.value = activeAccountId;
+}
+
+function deleteAccount(id) {
+    if (id === 'acc_default') return; // Cannot delete default
+    if (confirm("Are you sure you want to delete this account? All its transactions will be permanently lost.")) {
+        accounts = accounts.filter(a => a.id !== id);
+        transactions = transactions.filter(t => t.accountId !== id);
+        saveAccounts();
+        saveTransactions();
+        
+        if (activeAccountId === id) {
+            activeAccountId = 'acc_default';
+            localStorage.setItem('expensebook_active_account', activeAccountId);
+        }
+        
+        renderAccountList();
+        populateAccountSelector();
+        updateDashboard();
+        renderTransactions();
+    }
+}
 
 function populateCategoryDropdowns() {
     const formSelect = document.getElementById('category');
@@ -814,6 +915,7 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
 
                 transactions.push({
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                    accountId: activeAccountId,
                     type: type,
                     paymentMethod: 'UPI',
                     amount: finalAmount,

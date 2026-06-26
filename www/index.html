@@ -34,6 +34,15 @@
 
         <!-- Dashboard / Summary Cards -->
         <section class="dashboard">
+            <div class="account-selector-wrapper" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding: 0.5rem; background: var(--surface); border-radius: 12px; box-shadow: 0 2px 8px var(--shadow);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
+                    <i class="fa-solid fa-wallet" style="color: var(--primary);"></i>
+                    <select id="accountSelector" class="select-input" style="border: none; background: transparent; font-weight: 600; font-size: 1.1rem; padding: 0.25rem; flex: 1; outline: none;">
+                        <!-- Accounts injected by JS -->
+                    </select>
+                </div>
+                <button id="manageAccountsBtn" class="icon-btn small-btn" title="Manage Accounts"><i class="fa-solid fa-gear"></i></button>
+            </div>
             <p id="lastUpdatedText" class="last-updated">Last updated on: -</p>
             <div class="card balance-card">
                 <h3>Total Balance</h3>
@@ -155,6 +164,25 @@
                 </div>
                 <button type="submit" class="btn primary-btn">Save Transaction</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Manage Accounts -->
+    <div id="accountsModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Accounts</h2>
+                <button class="close-btn" data-close="accountsModal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="addAccountForm" class="flex-form">
+                    <input type="text" id="newAccountName" required placeholder="New Account Name (e.g. Business)">
+                    <button type="submit" class="btn primary-btn btn-small"><i class="fa-solid fa-plus"></i></button>
+                </form>
+                <ul id="accountList" class="category-list">
+                    <!-- Accounts injected by JS -->
+                </ul>
+            </div>
         </div>
     </div>
 
