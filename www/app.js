@@ -46,6 +46,8 @@ const accountsModal = document.getElementById('accountsModal');
 const deleteConfirmModal = document.getElementById('deleteConfirmModal');
 let transactionToDelete = null;
 
+let lastAddedTx = null; // Remembers the last added transaction's details
+
 // Init & Firebase Auth
 function init() {
     populateCategoryDropdowns();
@@ -151,6 +153,18 @@ function loadDataFromFirestore() {
 document.getElementById('fabBtn').addEventListener('click', () => {
     document.getElementById('transactionForm').reset();
     document.getElementById('txId').value = '';
+    
+    // Default date to today
+    document.getElementById('date').valueAsDate = new Date();
+    
+    // Restore previous defaults if available
+    if (lastAddedTx) {
+        document.querySelector(`input[name="type"][value="${lastAddedTx.type}"]`).checked = true;
+        document.querySelector(`input[name="paymentMethod"][value="${lastAddedTx.paymentMethod}"]`).checked = true;
+        document.getElementById('title').value = lastAddedTx.title;
+        document.getElementById('category').value = lastAddedTx.category;
+    }
+    
     openModal(transactionModal);
 });
 document.getElementById('manageCategoriesBtn').addEventListener('click', () => openModal(categoriesModal));
@@ -265,6 +279,9 @@ document.getElementById('transactionForm').addEventListener('submit', (e) => {
     if (currentUser) {
         db.collection('users').doc(currentUser.uid).collection('transactions').doc(tx.id).set(tx)
             .then(() => {
+                // Save for next time
+                lastAddedTx = { type, paymentMethod, title, category };
+                
                 // Reset and close
                 e.target.reset();
                 document.getElementById('txId').value = '';
