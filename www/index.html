@@ -18,7 +18,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
+    <!-- Login Overlay -->
+    <div id="loginOverlay" style="display: flex; position: fixed; inset: 0; background: var(--bg-color, #0f172a); z-index: 9999; align-items: center; justify-content: center; flex-direction: column; color: white;">
+        <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">ExpenseBook <span style="font-size: 1rem; color: var(--primary);">for Business</span></h1>
+        <p style="margin-bottom: 2rem; color: #94a3b8;">Securely sign in to sync your ledger</p>
+        <button id="googleSignInBtn" style="padding: 0.75rem 1.5rem; border-radius: 8px; border: none; background: white; color: #1e293b; font-weight: 600; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <i class="fa-brands fa-google" style="color: #ea4335;"></i> Sign in with Google
+        </button>
+    </div>
+
+    <div class="app-container" id="mainApp" style="display: none;">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
@@ -28,6 +37,7 @@
                     <input type="file" id="excelFileInput" accept=".xls,.xlsx,.csv" style="opacity: 0; position: absolute; left: -9999px; width: 0; height: 0;">
                     <button id="manageCategoriesBtn" class="icon-btn" title="Manage Categories"><i class="fa-solid fa-tags"></i></button>
                     <button id="exportPdfBtn" class="icon-btn" title="Export to PDF"><i class="fa-solid fa-file-pdf"></i></button>
+                    <button id="logoutBtn" class="icon-btn" title="Log Out" style="margin-left: 0.5rem; background: rgba(239, 68, 68, 0.1); color: #ef4444;"><i class="fa-solid fa-right-from-bracket"></i></button>
                 </div>
             </div>
         </header>
@@ -225,6 +235,12 @@
             </div>
         </div>
     </div>
+    </div>
+
+    <!-- Firebase SDKs (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
     <script src="app.js"></script>
 </body>

@@ -1,15 +1,27 @@
-let accounts = JSON.parse(localStorage.getItem('expensebook_accounts')) || [{ id: 'acc_default', name: 'Personal' }];
+const firebaseConfig = {
+    apiKey: "AIzaSyDgvaj_gbVaBHNBwvimXH7pstAywHEExes",
+    authDomain: "expensebook-lucky.firebaseapp.com",
+    projectId: "expensebook-lucky",
+    storageBucket: "expensebook-lucky.firebasestorage.app",
+    messagingSenderId: "143835058116",
+    appId: "1:143835058116:web:0a3e68dcc78c49b4061e91",
+    measurementId: "G-REYPT7EC1H"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentUser = null;
+let unsubscribeAccounts = null;
+let unsubscribeTransactions = null;
+
+let accounts = [];
 let activeAccountId = localStorage.getItem('expensebook_active_account') || 'acc_default';
 
-let transactions = JSON.parse(localStorage.getItem('expensebook_transactions')) || [];
+let transactions = [];
 let categories = JSON.parse(localStorage.getItem('expensebook_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
-let lastUpdated = localStorage.getItem('expensebook_last_updated') || null;
-
-// Migration: Assign existing transactions to default account
-transactions.forEach(t => {
-    if (!t.accountId) t.accountId = 'acc_default';
-});
-localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+let lastUpdated = null;
 
 // DOM Elements
 const totalBalanceEl = document.getElementById('totalBalance');
@@ -34,14 +46,105 @@ const accountsModal = document.getElementById('accountsModal');
 const deleteConfirmModal = document.getElementById('deleteConfirmModal');
 let transactionToDelete = null;
 
-// Init
+// Init & Firebase Auth
 function init() {
-    populateAccountSelector();
-    updateDashboard();
-    renderTransactions();
     populateCategoryDropdowns();
     renderCategoryList();
-    renderAccountList();
+    
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            currentUser = user;
+            document.getElementById('loginOverlay').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+            
+            migrateLocalData();
+            loadDataFromFirestore();
+        } else {
+            currentUser = null;
+            document.getElementById('loginOverlay').style.display = 'flex';
+            document.getElementById('mainApp').style.display = 'none';
+            
+            if (unsubscribeAccounts) unsubscribeAccounts();
+            if (unsubscribeTransactions) unsubscribeTransactions();
+        }
+    });
+}
+
+document.getElementById('googleSignInBtn').addEventListener('click', () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithPopup(provider).catch(err => alert(err.message));
+});
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    auth.signOut();
+});
+
+async function migrateLocalData() {
+    if (!currentUser) return;
+    let localAccs = JSON.parse(localStorage.getItem('expensebook_accounts'));
+    let localTxs = JSON.parse(localStorage.getItem('expensebook_transactions'));
+    
+    if (localAccs || localTxs) {
+        const batch = db.batch();
+        const userRef = db.collection('users').doc(currentUser.uid);
+        
+        if (localAccs) {
+            localAccs.forEach(acc => {
+                batch.set(userRef.collection('accounts').doc(acc.id), acc);
+            });
+            localStorage.removeItem('expensebook_accounts');
+        }
+        if (localTxs) {
+            localTxs.forEach(tx => {
+                if (!tx.accountId) tx.accountId = 'acc_default';
+                batch.set(userRef.collection('transactions').doc(tx.id), tx);
+            });
+            localStorage.removeItem('expensebook_transactions');
+        }
+        try { await batch.commit(); console.log("Migrated local data to Firestore"); } 
+        catch(e) { console.error("Migration failed: ", e); }
+    }
+}
+
+function loadDataFromFirestore() {
+    const userRef = db.collection('users').doc(currentUser.uid);
+    
+    unsubscribeAccounts = userRef.collection('accounts').onSnapshot(snapshot => {
+        accounts = [];
+        snapshot.forEach(doc => accounts.push(doc.data()));
+        if (accounts.length === 0) {
+            const defAcc = { id: 'acc_default', name: 'Personal' };
+            accounts.push(defAcc);
+            userRef.collection('accounts').doc('acc_default').set(defAcc);
+        }
+        
+        if (!accounts.find(a => a.id === activeAccountId)) {
+            activeAccountId = accounts[0].id;
+            localStorage.setItem('expensebook_active_account', activeAccountId);
+        }
+        
+        populateAccountSelector();
+        renderAccountList();
+        updateDashboard();
+        renderTransactions();
+    });
+
+    unsubscribeTransactions = userRef.collection('transactions').onSnapshot(snapshot => {
+        transactions = [];
+        snapshot.forEach(doc => transactions.push(doc.data()));
+        
+        transactions.sort((a, b) => {
+            const dateDiff = new Date(b.date) - new Date(a.date);
+            if (dateDiff === 0) return b.id.localeCompare(a.id);
+            return dateDiff;
+        });
+
+        lastUpdated = new Date().toLocaleString();
+        if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+        
+        updateDashboard();
+        renderTransactions();
+    });
 }
 
 // Event Listeners
@@ -148,43 +251,30 @@ document.getElementById('transactionForm').addEventListener('submit', (e) => {
     const title = rawTitle || category;
     const date = document.getElementById('date').value;
 
-    if (txId) {
-        // Edit existing
-        const index = transactions.findIndex(t => t.id === txId);
-        if (index > -1) {
-            transactions[index] = {
-                ...transactions[index],
-                type,
-                paymentMethod,
-                amount,
-                title,
-                category,
-                date
-            };
-        }
-    } else {
-        // Add new
-        transactions.push({
-            id: Date.now().toString(),
-            accountId: activeAccountId,
-            type,
-            paymentMethod,
-            amount,
-            title,
-            category,
-            date
-        });
+    const tx = {
+        id: txId || Date.now().toString(),
+        accountId: activeAccountId,
+        type,
+        paymentMethod,
+        amount,
+        title,
+        category,
+        date
+    };
+
+    if (currentUser) {
+        db.collection('users').doc(currentUser.uid).collection('transactions').doc(tx.id).set(tx)
+            .then(() => {
+                // Reset and close
+                e.target.reset();
+                document.getElementById('txId').value = '';
+                document.getElementById('date').valueAsDate = new Date(); // Reset to today
+                closeModal(transactionModal);
+            })
+            .catch(err => alert("Error saving transaction: " + err.message));
     }
 
-    saveTransactions();
-
-    // Reset and close
-    e.target.reset();
-    document.getElementById('txId').value = '';
-    document.getElementById('date').valueAsDate = new Date(); // Reset to today
-    closeModal(transactionModal);
-
-    renderTransactions();
+    // Handled in Firestore callback above
 });
 
 // Add Category Form
@@ -208,21 +298,18 @@ document.getElementById('addAccountForm').addEventListener('submit', (e) => {
     const input = document.getElementById('newAccountName');
     const newName = input.value.trim();
 
-    if (newName) {
+    if (newName && currentUser) {
         const newId = 'acc_' + Date.now();
-        accounts.push({ id: newId, name: newName });
-        saveAccounts();
-        renderAccountList();
-        populateAccountSelector();
+        const acc = { id: newId, name: newName };
         
-        // Auto-switch to new account
-        activeAccountId = newId;
-        localStorage.setItem('expensebook_active_account', activeAccountId);
-        accountSelector.value = activeAccountId;
-        updateDashboard();
-        renderTransactions();
-        
-        input.value = '';
+        db.collection('users').doc(currentUser.uid).collection('accounts').doc(newId).set(acc)
+            .then(() => {
+                // Auto-switch to new account
+                activeAccountId = newId;
+                localStorage.setItem('expensebook_active_account', activeAccountId);
+                input.value = '';
+            })
+            .catch(err => alert("Error adding account: " + err.message));
     }
 });
 
@@ -298,13 +385,13 @@ function deleteTransaction(id) {
 }
 
 document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
-    if (transactionToDelete) {
-        transactions = transactions.filter(t => t.id !== transactionToDelete);
-        saveTransactions();
-        updateDashboard();
-        renderTransactions();
-        transactionToDelete = null;
-        closeModal(deleteConfirmModal);
+    if (transactionToDelete && currentUser) {
+        db.collection('users').doc(currentUser.uid).collection('transactions').doc(transactionToDelete).delete()
+            .then(() => {
+                transactionToDelete = null;
+                closeModal(deleteConfirmModal);
+            })
+            .catch(err => alert("Error deleting: " + err.message));
     }
 });
 
@@ -502,22 +589,23 @@ function populateAccountSelector() {
 }
 
 function deleteAccount(id) {
-    if (id === 'acc_default') return; // Cannot delete default
+    if (id === 'acc_default' || !currentUser) return; // Cannot delete default
     if (confirm("Are you sure you want to delete this account? All its transactions will be permanently lost.")) {
-        accounts = accounts.filter(a => a.id !== id);
-        transactions = transactions.filter(t => t.accountId !== id);
-        saveAccounts();
-        saveTransactions();
+        const batch = db.batch();
+        const userRef = db.collection('users').doc(currentUser.uid);
         
-        if (activeAccountId === id) {
-            activeAccountId = 'acc_default';
-            localStorage.setItem('expensebook_active_account', activeAccountId);
-        }
+        batch.delete(userRef.collection('accounts').doc(id));
         
-        renderAccountList();
-        populateAccountSelector();
-        updateDashboard();
-        renderTransactions();
+        transactions.filter(t => t.accountId === id).forEach(t => {
+            batch.delete(userRef.collection('transactions').doc(t.id));
+        });
+        
+        batch.commit().then(() => {
+            if (activeAccountId === id) {
+                activeAccountId = 'acc_default';
+                localStorage.setItem('expensebook_active_account', activeAccountId);
+            }
+        }).catch(err => alert(err.message));
     }
 }
 
@@ -902,6 +990,7 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
             }
 
             let importedCount = 0;
+            const batch = currentUser ? db.batch() : null;
 
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -976,25 +1065,28 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
 
                 if (finalAmount <= 0) continue;
 
-                transactions.push({
-                    id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-                    accountId: activeAccountId,
-                    type: type,
-                    paymentMethod: 'UPI',
-                    amount: finalAmount,
-                    title: String(title),
-                    category: 'Uncategorized',
-                    date: isoDate
-                });
-                importedCount++;
+                if (batch && currentUser) {
+                    const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+                    const tx = {
+                        id: newId,
+                        accountId: activeAccountId,
+                        type: type,
+                        paymentMethod: 'UPI',
+                        amount: finalAmount,
+                        title: String(title),
+                        category: 'Uncategorized',
+                        date: isoDate
+                    };
+                    batch.set(db.collection('users').doc(currentUser.uid).collection('transactions').doc(newId), tx);
+                    importedCount++;
+                }
             }
 
-            if (importedCount > 0) {
-                saveTransactions();
-                updateDashboard();
-                renderTransactions();
-                alert(`Successfully imported ${importedCount} transactions!`);
-            } else {
+            if (importedCount > 0 && batch) {
+                batch.commit().then(() => {
+                    alert(`Successfully imported ${importedCount} transactions!`);
+                }).catch(err => alert("Error importing: " + err.message));
+            } else if (importedCount === 0) {
                 alert("No valid transactions found in the file. Ensure the amount and date columns contain valid data.");
             }
         } catch (error) {
