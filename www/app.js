@@ -575,7 +575,7 @@ function renderChart(filteredTransactions) {
     });
 }
 
-function exportToPDF() {
+async function exportToPDF() {
     if (currentFilteredTransactions.length === 0) {
         alert("No transactions to export.");
         return;
@@ -649,7 +649,34 @@ function exportToPDF() {
         }
     });
 
-    doc.save(`ExpenseBook_Statement_${new Date().toISOString().split('T')[0]}.pdf`);
+    const fileName = `ExpenseBook_Statement_${new Date().toISOString().split('T')[0]}.pdf`;
+
+    if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+        try {
+            const base64Data = doc.output('datauristring').split(',')[1];
+            
+            const Filesystem = window.Capacitor.Plugins.Filesystem;
+            const Share = window.Capacitor.Plugins.Share;
+            
+            const writeResult = await Filesystem.writeFile({
+                path: fileName,
+                data: base64Data,
+                directory: 'CACHE' // CACHE is best for temp share files
+            });
+            
+            await Share.share({
+                title: fileName,
+                text: 'Here is my ExpenseBook statement.',
+                url: writeResult.uri,
+                dialogTitle: 'Save or Share PDF'
+            });
+        } catch (e) {
+            console.error("Native export failed:", e);
+            alert("Error exporting PDF on device. " + e.message);
+        }
+    } else {
+        doc.save(fileName);
+    }
 }
 
 // Excel Import Logic
