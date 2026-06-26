@@ -685,38 +685,101 @@ async function exportToPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
 
+    // 1. Gather Filter Info
+    const activeAccountName = accounts.find(a => a.id === activeAccountId)?.name || 'Unknown Account';
+    const startFilter = filterStartDateEl.value ? new Date(filterStartDateEl.value) : null;
+    const endFilter = filterEndDateEl.value ? new Date(filterEndDateEl.value) : null;
+    const searchFilter = filterSearchEl.value.trim();
+    const typeFilter = filterTxTypeEl.value;
+    const methodFilter = filterPaymentMethodEl.value;
+
+    let filterSummary = `Account: ${activeAccountName}`;
+    if (startFilter || endFilter) {
+        const s = startFilter ? startFilter.toLocaleDateString('en-GB') : 'Start';
+        const e = endFilter ? endFilter.toLocaleDateString('en-GB') : 'Present';
+        filterSummary += ` | Dates: ${s} to ${e}`;
+    }
+    if (selectedCategories.length > 0) filterSummary += ` | Categories: ${selectedCategories.join(', ')}`;
+    if (typeFilter !== 'all') filterSummary += ` | Type: ${typeFilter.charAt(0).toUpperCase() + typeFilter.slice(1)}`;
+    if (methodFilter !== 'all') filterSummary += ` | Method: ${methodFilter}`;
+    if (searchFilter) filterSummary += ` | Search: "${searchFilter}"`;
+
+    // 2. Calculate Opening Balance precisely based on non-date filters prior to start date
+    const activeTransactions = transactions.filter(t => t.accountId === activeAccountId);
+    let openingBalance = 0;
+    
+    if (startFilter) {
+        activeTransactions.forEach(t => {
+            const txDate = new Date(t.date);
+            if (txDate < startFilter) {
+                const matchCat = selectedCategories.length === 0 || selectedCategories.includes(t.category);
+                const displayTitle = t.title;
+                const matchSearch = searchFilter === '' ||
+                    displayTitle.toLowerCase().includes(searchFilter.toLowerCase()) ||
+                    t.category.toLowerCase().includes(searchFilter.toLowerCase());
+                
+                const safeTypeFilter = (typeFilter || '').trim().toLowerCase();
+                const matchType = safeTypeFilter === 'all' || safeTypeFilter === 'all types' || safeTypeFilter === '' || t.type === typeFilter;
+                
+                const txMethod = t.paymentMethod || 'UPI';
+                const safeMethodFilter = (methodFilter || '').trim().toLowerCase();
+                const matchMethod = safeMethodFilter === 'all' || safeMethodFilter === 'all methods' || safeMethodFilter === '' || txMethod === methodFilter;
+                
+                if (matchCat && matchSearch && matchType && matchMethod) {
+                    if (t.type === 'income') openingBalance += t.amount;
+                    else openingBalance -= t.amount;
+                }
+            }
+        });
+    }
+
+    // 3. Calculate Income and Expense for the filtered period
+    let totalIncome = 0;
+    let totalExpense = 0;
+    currentFilteredTransactions.forEach(t => {
+        if (t.type === 'income') totalIncome += t.amount;
+        else totalExpense += t.amount;
+    });
+
+    const closingBalance = openingBalance + totalIncome - totalExpense;
+
+    // 4. Render PDF Header
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(15, 23, 42); // Dark slate
     doc.text("ExpenseBook Statement", 14, 22);
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
+    
+    // Wrap filter summary text
+    const splitFilters = doc.splitTextToSize(`Filters Applied: ${filterSummary}`, 180);
+    doc.setFont("helvetica", "italic");
+    doc.text(splitFilters, 14, 34);
 
-    // Calculate balances based on current filtered view
-    const sortedTxs = [...currentFilteredTransactions].sort((a, b) => new Date(a.date) - new Date(b.date)); // Oldest first
-
-    const closingBalance = sortedTxs[sortedTxs.length - 1].runningBalance;
-    const firstTx = sortedTxs[0];
-    let openingBalance = firstTx.runningBalance;
-    if (firstTx.type === 'income') {
-        openingBalance -= firstTx.amount;
-    } else {
-        openingBalance += firstTx.amount;
-    }
+    let startY = 34 + (splitFilters.length * 5) + 4;
 
     doc.setFont("helvetica", "bold");
     doc.setTextColor(15, 23, 42);
-    doc.text(`Opening Balance: Rs. ${openingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 14, 42);
-    doc.text(`Closing Balance: Rs. ${closingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 110, 42);
+    doc.text(`Opening Balance: Rs. ${openingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 14, startY);
+    doc.text(`Closing Balance: Rs. ${closingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 110, startY);
+    
+    startY += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(16, 185, 129); // Green
+    doc.text(`Total Income: Rs. ${totalIncome.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 14, startY);
+    doc.setTextColor(239, 68, 68); // Red
+    doc.text(`Total Expense: Rs. ${totalExpense.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 110, startY);
 
     const tableColumn = ["Date", "Title", "Category", "Method", "Type", "Amount"];
     const tableRows = [];
 
-    // Reverse back to newest first for display
-    sortedTxs.reverse().forEach(tx => {
+    // Sort oldest first for the table reading
+    const sortedTxs = [...currentFilteredTransactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    sortedTxs.forEach(tx => {
         const rowData = [
             new Date(tx.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
             tx.title,
@@ -731,7 +794,7 @@ async function exportToPDF() {
     doc.autoTable({
         head: [tableColumn],
         body: tableRows,
-        startY: 50,
+        startY: startY + 6,
         theme: 'striped',
         styles: { font: 'helvetica', fontSize: 10 },
         headStyles: { fillColor: [15, 23, 42], textColor: 255 },
