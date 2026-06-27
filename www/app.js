@@ -270,7 +270,17 @@ function loadDataFromFirestore() {
 
     unsubscribeHistory = userRef.collection('importHistory').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
         importHistory = [];
-        snapshot.forEach(doc => importHistory.push(doc.data()));
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            data.id = doc.id;
+            importHistory.push(data);
+        });
+        
+        // Auto-refresh the modal if it's currently open
+        const historyModal = document.getElementById('importHistoryModal');
+        if (historyModal && !historyModal.classList.contains('hidden')) {
+            renderImportHistory();
+        }
     });
 }
 
@@ -550,12 +560,12 @@ function deleteTransaction(id) {
 
 document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
     if (transactionToDelete && currentUser) {
-        db.collection('users').doc(currentUser.uid).collection('transactions').doc(transactionToDelete).delete()
-            .then(() => {
-                transactionToDelete = null;
-                closeModal(deleteConfirmModal);
-            })
-            .catch(err => alert("Error deleting: " + err.message));
+        const idToDelete = transactionToDelete;
+        transactionToDelete = null;
+        closeModal(deleteConfirmModal);
+        
+        db.collection('users').doc(currentUser.uid).collection('transactions').doc(idToDelete).delete()
+            .catch(err => console.error("Error deleting transaction in background:", err));
     }
 });
 
@@ -1473,15 +1483,24 @@ function renderImportHistory() {
             li.className = 'category-item';
             const dateStr = new Date(item.timestamp).toLocaleString();
             li.innerHTML = `
-                <div style="display:flex; flex-direction:column; gap:4px; max-width: 80%;">
+                <div style="display:flex; flex-direction:column; gap:4px; max-width: 60%;">
                     <span style="font-weight:600; font-size:0.95rem; word-break: break-all;">${item.fileName}</span>
                     <span style="font-size:0.75rem; color:var(--text-secondary);">${dateStr}</span>
                 </div>
-                <a href="${item.url}" target="_blank" class="icon-btn" title="View/Download" style="text-decoration:none;"><i class="fa-solid fa-download"></i></a>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <a href="${item.url}" target="_blank" class="icon-btn" title="View/Download" style="text-decoration:none;"><i class="fa-solid fa-download"></i></a>
+                    <button class="icon-btn delete-btn" onclick="deleteImportHistoryItem('${item.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                </div>
             `;
             list.appendChild(li);
         });
     }
+}
+
+function deleteImportHistoryItem(id) {
+    if (!currentUser) return;
+    db.collection('users').doc(currentUser.uid).collection('importHistory').doc(id).delete()
+        .catch(err => console.error("Error deleting import history:", err));
 }
 
 // Start
