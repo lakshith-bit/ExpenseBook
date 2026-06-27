@@ -118,8 +118,9 @@ function init() {
             document.getElementById('phoneNumberInput').value = '';
             document.getElementById('otpInput').value = '';
             
-            migrateLocalData();
-            loadDataFromFirestore();
+            migrateLocalData().then(() => {
+                loadDataFromFirestore();
+            });
         } else {
             currentUser = null;
             document.getElementById('loginOverlay').style.display = 'flex';
@@ -132,17 +133,26 @@ function init() {
     });
 }
 
-// Phone Auth Listeners
 document.getElementById('sendOtpBtn').addEventListener('click', () => {
     const countryCode = document.getElementById('countryCodeInput').value.trim();
-    const phoneNum = document.getElementById('phoneNumberInput').value.trim();
+    let phoneNum = document.getElementById('phoneNumberInput').value.trim();
     
     if (!phoneNum) {
         alert("Please enter a valid phone number.");
         return;
     }
 
-    const fullPhoneNumber = countryCode + phoneNum;
+    // Clean phone number: remove non-digits
+    let digitsOnly = phoneNum.replace(/\D/g, '');
+    // Clean country code digits
+    let codeDigits = countryCode.replace(/\D/g, '');
+
+    // Normalize phone number: if it starts with the country code digits and is longer than 10 digits, strip it
+    if (digitsOnly.startsWith(codeDigits) && digitsOnly.length > 10) {
+        digitsOnly = digitsOnly.substring(codeDigits.length);
+    }
+
+    const fullPhoneNumber = countryCode + digitsOnly;
     
     const sendBtn = document.getElementById('sendOtpBtn');
     sendBtn.innerText = "Sending...";
@@ -232,15 +242,21 @@ function loadDataFromFirestore() {
     const userRef = db.collection('users').doc(currentUser.uid);
     
     unsubscribeAccounts = userRef.collection('accounts').onSnapshot(snapshot => {
+        // Ignore initial empty cache snapshots to prevent race conditions or incorrect resets
+        if (snapshot.empty && snapshot.metadata.fromCache) {
+            return;
+        }
+
         accounts = [];
         snapshot.forEach(doc => accounts.push(doc.data()));
-        if (accounts.length === 0) {
+        
+        if (snapshot.empty && !snapshot.metadata.fromCache) {
             const defAcc = { id: 'acc_default', name: 'Personal' };
             accounts.push(defAcc);
             userRef.collection('accounts').doc('acc_default').set(defAcc);
         }
         
-        if (!accounts.find(a => a.id === activeAccountId)) {
+        if (accounts.length > 0 && !accounts.find(a => a.id === activeAccountId)) {
             activeAccountId = accounts[0].id;
             localStorage.setItem('expensebook_active_account', activeAccountId);
         }
@@ -252,6 +268,10 @@ function loadDataFromFirestore() {
     });
 
     unsubscribeTransactions = userRef.collection('transactions').onSnapshot(snapshot => {
+        if (snapshot.empty && snapshot.metadata.fromCache) {
+            return;
+        }
+
         transactions = [];
         snapshot.forEach(doc => transactions.push(doc.data()));
         
@@ -269,6 +289,10 @@ function loadDataFromFirestore() {
     });
 
     unsubscribeHistory = userRef.collection('importHistory').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
+        if (snapshot.empty && snapshot.metadata.fromCache) {
+            return;
+        }
+
         importHistory = [];
         snapshot.forEach(doc => {
             const data = doc.data();
