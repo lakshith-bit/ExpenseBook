@@ -15,7 +15,9 @@ const db = firebase.firestore();
 let currentUser = null;
 let unsubscribeAccounts = null;
 let unsubscribeTransactions = null;
+let unsubscribeHistory = null;
 
+let importHistory = [];
 let accounts = [];
 let activeAccountId = localStorage.getItem('expensebook_active_account') || 'acc_default';
 
@@ -44,20 +46,77 @@ let currentFilteredTransactions = [];
 const categoriesModal = document.getElementById('categoriesModal');
 const accountsModal = document.getElementById('accountsModal');
 const deleteConfirmModal = document.getElementById('deleteConfirmModal');
+const importHistoryModal = document.getElementById('importHistoryModal');
 let transactionToDelete = null;
 
 let lastAddedTx = null; // Remembers the last added transaction's details
+
+// Theme Logic
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+let currentTheme = localStorage.getItem('expensebook_theme') || 'dark';
+
+function applyTheme(theme) {
+    if (theme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-sun"></i>';
+    } else {
+        document.documentElement.removeAttribute('data-theme');
+        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-moon"></i>';
+    }
+}
+
+if(themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+        currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('expensebook_theme', currentTheme);
+        applyTheme(currentTheme);
+        
+        // Redraw chart with new colors
+        if(expenseChartInstance) {
+            updateDashboard(); 
+        }
+    });
+}
+applyTheme(currentTheme);
+
+// Phone Auth Variables
+let confirmationResult = null;
+let recaptchaVerifier = null;
 
 // Init & Firebase Auth
 function init() {
     populateCategoryDropdowns();
     renderCategoryList();
     
+    // Initialize Recaptcha (Visible to avoid popup blockers/z-index issues)
+    recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+        'size': 'normal',
+        'callback': (response) => {
+            // reCAPTCHA solved, enable Send OTP button
+            const btn = document.getElementById('sendOtpBtn');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        },
+        'expired-callback': () => {
+            // Response expired. Ask user to solve reCAPTCHA again.
+            const btn = document.getElementById('sendOtpBtn');
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
+        }
+    });
+    recaptchaVerifier.render();
+
     auth.onAuthStateChanged(user => {
         if (user) {
             currentUser = user;
             document.getElementById('loginOverlay').style.display = 'none';
             document.getElementById('mainApp').style.display = 'block';
+            
+            // Reset Phone Auth UI just in case
+            document.getElementById('phoneAuthContainer').style.display = 'flex';
+            document.getElementById('otpAuthContainer').style.display = 'none';
+            document.getElementById('phoneNumberInput').value = '';
+            document.getElementById('otpInput').value = '';
             
             migrateLocalData();
             loadDataFromFirestore();
@@ -68,13 +127,74 @@ function init() {
             
             if (unsubscribeAccounts) unsubscribeAccounts();
             if (unsubscribeTransactions) unsubscribeTransactions();
+            if (unsubscribeHistory) unsubscribeHistory();
         }
     });
 }
 
-document.getElementById('googleSignInBtn').addEventListener('click', () => {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    auth.signInWithPopup(provider).catch(err => alert(err.message));
+// Phone Auth Listeners
+document.getElementById('sendOtpBtn').addEventListener('click', () => {
+    const countryCode = document.getElementById('countryCodeInput').value.trim();
+    const phoneNum = document.getElementById('phoneNumberInput').value.trim();
+    
+    if (!phoneNum) {
+        alert("Please enter a valid phone number.");
+        return;
+    }
+
+    const fullPhoneNumber = countryCode + phoneNum;
+    
+    const sendBtn = document.getElementById('sendOtpBtn');
+    sendBtn.innerText = "Sending...";
+    sendBtn.disabled = true;
+
+    auth.signInWithPhoneNumber(fullPhoneNumber, recaptchaVerifier)
+        .then((result) => {
+            confirmationResult = result;
+            document.getElementById('phoneAuthContainer').style.display = 'none';
+            document.getElementById('otpAuthContainer').style.display = 'flex';
+        })
+        .catch((error) => {
+            console.error("SMS not sent", error);
+            alert("Error sending OTP. Please try again. " + error.message);
+            // Reset Recaptcha if it fails
+            if (recaptchaVerifier) recaptchaVerifier.render().then(widgetId => grecaptcha.reset(widgetId));
+        })
+        .finally(() => {
+            sendBtn.innerText = "Send OTP";
+            sendBtn.disabled = false;
+        });
+});
+
+document.getElementById('verifyOtpBtn').addEventListener('click', () => {
+    const code = document.getElementById('otpInput').value.trim();
+    if (code.length !== 6) {
+        alert("Please enter the 6-digit OTP.");
+        return;
+    }
+    
+    const verifyBtn = document.getElementById('verifyOtpBtn');
+    verifyBtn.innerText = "Verifying...";
+    verifyBtn.disabled = true;
+
+    confirmationResult.confirm(code).then((result) => {
+        // User signed in successfully
+        // onAuthStateChanged will handle UI updates
+    }).catch((error) => {
+        console.error("OTP verification failed", error);
+        alert("Invalid OTP. Please try again.");
+    }).finally(() => {
+        verifyBtn.innerText = "Verify & Sign In";
+        verifyBtn.disabled = false;
+    });
+});
+
+document.getElementById('backToPhoneBtn').addEventListener('click', () => {
+    document.getElementById('phoneAuthContainer').style.display = 'flex';
+    document.getElementById('otpAuthContainer').style.display = 'none';
+    document.getElementById('otpInput').value = '';
+    // Reset recaptcha
+    if (recaptchaVerifier) recaptchaVerifier.render().then(widgetId => grecaptcha.reset(widgetId));
 });
 
 document.getElementById('logoutBtn').addEventListener('click', () => {
@@ -147,6 +267,11 @@ function loadDataFromFirestore() {
         updateDashboard();
         renderTransactions();
     });
+
+    unsubscribeHistory = userRef.collection('importHistory').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
+        importHistory = [];
+        snapshot.forEach(doc => importHistory.push(doc.data()));
+    });
 }
 
 // Event Listeners
@@ -167,10 +292,34 @@ document.getElementById('fabBtn').addEventListener('click', () => {
     
     openModal(transactionModal);
 });
-document.getElementById('manageCategoriesBtn').addEventListener('click', () => openModal(categoriesModal));
-document.getElementById('manageAccountsBtn').addEventListener('click', () => openModal(accountsModal));
+document.getElementById('importExcelBtn').addEventListener('click', () => {
+    document.getElementById('excelFileInput').click();
+    document.getElementById('menuDropdown').classList.add('hidden');
+});
 
-accountSelector.addEventListener('change', (e) => {
+document.getElementById('manageCategoriesBtn').addEventListener('click', () => {
+    openModal(categoriesModal);
+    document.getElementById('menuDropdown').classList.add('hidden');
+});
+document.getElementById('manageAccountsBtn').addEventListener('click', () => openModal(accountsModal));
+document.getElementById('importHistoryBtn').addEventListener('click', () => {
+    renderImportHistory();
+    openModal(importHistoryModal);
+    document.getElementById('menuDropdown').classList.add('hidden');
+});
+document.getElementById('exportPdfBtn').addEventListener('click', () => {
+    exportToPDF();
+    document.getElementById('menuDropdown').classList.add('hidden');
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+    const menuDropdown = document.getElementById('menuDropdown');
+    const menuDropdownBtn = document.getElementById('menuDropdownBtn');
+    if (menuDropdown && !menuDropdown.classList.contains('hidden') && !menuDropdown.contains(e.target) && !menuDropdownBtn.contains(e.target)) {
+        menuDropdown.classList.add('hidden');
+    }
+});accountSelector.addEventListener('change', (e) => {
     activeAccountId = e.target.value;
     localStorage.setItem('expensebook_active_account', activeAccountId);
     updateDashboard();
@@ -237,8 +386,6 @@ filterEndDateEl.addEventListener('change', () => {
     }
     renderTransactions();
 });
-
-document.getElementById('exportPdfBtn').addEventListener('click', exportToPDF);
 
 // Tab Switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -583,17 +730,42 @@ function saveAccounts() {
 
 function renderAccountList() {
     const list = document.getElementById('accountList');
-    if (!list) return;
     list.innerHTML = '';
     accounts.forEach(acc => {
-        const li = document.createElement('li');
-        li.className = 'category-item';
-        li.innerHTML = `
+        const div = document.createElement('div');
+        div.style.display = 'flex';
+        div.style.justifyContent = 'space-between';
+        div.style.alignItems = 'center';
+        div.style.padding = '12px';
+        div.style.border = '1px solid var(--border)';
+        div.style.borderRadius = '12px';
+        div.style.marginBottom = '8px';
+        div.style.background = 'var(--surface)';
+
+        div.innerHTML = `
             <span>${acc.name} ${acc.id === 'acc_default' ? '(Default)' : ''}</span>
-            ${acc.id !== 'acc_default' ? `<button type="button" onclick="deleteAccount('${acc.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>` : '<span></span>'}
+            <div>
+                <button class="icon-btn edit-btn" onclick="renameAccount('${acc.id}', '${acc.name}')"><i class="fa-solid fa-pen"></i></button>
+                <button class="icon-btn delete-btn" onclick="deleteAccount('${acc.id}')"><i class="fa-solid fa-trash"></i></button>
+            </div>
         `;
-        list.appendChild(li);
+        list.appendChild(div);
     });
+}
+
+async function renameAccount(id, currentName) {
+    if (!currentUser) return;
+    const newName = prompt("Enter new account name:", currentName);
+    if (!newName || newName.trim() === "" || newName === currentName) return;
+    
+    try {
+        await db.collection('users').doc(currentUser.uid).collection('accounts').doc(id).update({
+            name: newName.trim()
+        });
+        // The onSnapshot listener will automatically re-render the list and selector
+    } catch (err) {
+        alert("Error renaming account: " + err.message);
+    }
 }
 
 function populateAccountSelector() {
@@ -606,23 +778,28 @@ function populateAccountSelector() {
 }
 
 function deleteAccount(id) {
-    if (id === 'acc_default' || !currentUser) return; // Cannot delete default
-    if (confirm("Are you sure you want to delete this account? All its transactions will be permanently lost.")) {
-        const batch = db.batch();
-        const userRef = db.collection('users').doc(currentUser.uid);
-        
-        batch.delete(userRef.collection('accounts').doc(id));
-        
-        transactions.filter(t => t.accountId === id).forEach(t => {
-            batch.delete(userRef.collection('transactions').doc(t.id));
-        });
-        
-        batch.commit().then(() => {
+    if (!currentUser) return;
+    if (confirm("Are you sure you want to delete this account? All associated transactions will be deleted.")) {
+        db.collection('users').doc(currentUser.uid).collection('accounts').doc(id).delete().then(() => {
+            // Delete associated transactions
+            const txsToDelete = transactions.filter(t => t.accountId === id);
+            txsToDelete.forEach(tx => {
+                db.collection('users').doc(currentUser.uid).collection('transactions').doc(tx.id).delete();
+            });
+            
+            // update active account if it was the deleted one
             if (activeAccountId === id) {
-                activeAccountId = 'acc_default';
-                localStorage.setItem('expensebook_active_account', activeAccountId);
+                activeAccountId = accounts.length > 1 ? accounts.find(a => a.id !== id).id : 'acc_default';
+                if(accounts.length <= 1) {
+                    // Recreate default account if none left
+                    db.collection('users').doc(currentUser.uid).collection('accounts').doc('acc_default').set({
+                        id: 'acc_default',
+                        name: 'Personal'
+                    });
+                }
             }
-        }).catch(err => alert(err.message));
+            renderTransactions();
+        }).catch(err => alert("Error deleting account: " + err.message));
     }
 }
 
@@ -948,36 +1125,44 @@ async function exportToPDF() {
     }
 }
 
-// Excel Import Logic
+// Unified Import Logic (Excel & PDF)
 document.getElementById('importExcelBtn').addEventListener('click', () => {
     document.getElementById('excelFileInput').click();
 });
 
-document.getElementById('excelFileInput').addEventListener('change', function (e) {
+document.getElementById('excelFileInput').addEventListener('change', async function (e) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = function (e) {
+    if (file.name.toLowerCase().endsWith('.pdf')) {
         try {
-            const data = new Uint8Array(e.target.result);
+            const parsedTxs = await parseCanaraBankPDF(file);
+            if (parsedTxs.length === 0) {
+                alert("No transactions found in this PDF. Ensure it is a Canara Bank format.");
+            } else {
+                processImportedTransactions(parsedTxs, file);
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Error parsing PDF file.");
+        }
+        e.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (evt) {
+        try {
+            const data = new Uint8Array(evt.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
 
-            // Use header: 1 to get an array of arrays, so we can find the actual header row
             const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-            if (!categories.includes('Uncategorized')) {
-                categories.push('Uncategorized');
-                saveCategories();
-                populateCategoryDropdowns();
-            }
 
             let headerRowIndex = -1;
             let colMap = { date: -1, title: -1, withdrawal: -1, deposit: -1, amount: -1 };
 
-            // Scan the first 50 rows to find the header row
             for (let i = 0; i < Math.min(rows.length, 50); i++) {
                 const row = rows[i];
                 if (!row || !Array.isArray(row)) continue;
@@ -1006,8 +1191,7 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
                 return;
             }
 
-            let importedCount = 0;
-            const batch = currentUser ? db.batch() : null;
+            const parsedTxs = [];
 
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -1016,7 +1200,7 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
                 const dateStr = row[colMap.date];
                 const title = row[colMap.title];
 
-                if (!dateStr || !title) continue; // skip invalid rows
+                if (!dateStr || !title) continue;
 
                 let withdrawal = colMap.withdrawal !== -1 ? parseFloat(row[colMap.withdrawal]) : NaN;
                 let deposit = colMap.deposit !== -1 ? parseFloat(row[colMap.deposit]) : NaN;
@@ -1024,7 +1208,6 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
                 if (isNaN(withdrawal)) withdrawal = 0;
                 if (isNaN(deposit)) deposit = 0;
 
-                // Fallback for amounts if there's just one 'Amount' column
                 if (withdrawal === 0 && deposit === 0 && colMap.amount !== -1) {
                     let amt = parseFloat(row[colMap.amount]);
                     if (!isNaN(amt)) {
@@ -1035,23 +1218,19 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
 
                 let parsedDate;
                 if (typeof dateStr === 'number') {
-                    // Excel date serial number. Excel dates represent local midnight.
                     let utcMs = Math.round((dateStr - 25569) * 86400 * 1000);
                     let tempDate = new Date(utcMs);
-                    // Add timezone offset to force it to local midnight
                     parsedDate = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
                 } else {
                     let str = String(dateStr).trim();
                     const parts = str.split(/[-/]/);
                     if (parts.length === 3) {
                         if (parts[0].length === 4) {
-                            // Format: YYYY-MM-DD
                             let year = parseInt(parts[0]);
                             let month = parseInt(parts[1]) - 1;
                             let day = parseInt(parts[2]);
                             parsedDate = new Date(year, month, day);
                         } else if (!isNaN(parts[1])) {
-                            // Format: DD/MM/YYYY
                             let day = parseInt(parts[0]);
                             let month = parseInt(parts[1]) - 1;
                             let year = parseInt(parts[2]);
@@ -1067,7 +1246,6 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
 
                 if (isNaN(parsedDate.getTime())) parsedDate = new Date();
 
-                // Build ISO string in Local Time to prevent 1-day timezone shifting
                 const yearStr = parsedDate.getFullYear();
                 const monthStr = String(parsedDate.getMonth() + 1).padStart(2, '0');
                 const dayStr = String(parsedDate.getDate()).padStart(2, '0');
@@ -1082,29 +1260,19 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
 
                 if (finalAmount <= 0) continue;
 
-                if (batch && currentUser) {
-                    const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-                    const tx = {
-                        id: newId,
-                        accountId: activeAccountId,
-                        type: type,
-                        paymentMethod: 'UPI',
-                        amount: finalAmount,
-                        title: String(title),
-                        category: 'Uncategorized',
-                        date: isoDate
-                    };
-                    batch.set(db.collection('users').doc(currentUser.uid).collection('transactions').doc(newId), tx);
-                    importedCount++;
-                }
+                parsedTxs.push({
+                    date: isoDate,
+                    title: String(title),
+                    amount: finalAmount,
+                    type: type,
+                    paymentMethod: 'UPI'
+                });
             }
 
-            if (importedCount > 0 && batch) {
-                batch.commit().then(() => {
-                    alert(`Successfully imported ${importedCount} transactions!`);
-                }).catch(err => alert("Error importing: " + err.message));
-            } else if (importedCount === 0) {
-                alert("No valid transactions found in the file. Ensure the amount and date columns contain valid data.");
+            if (parsedTxs.length > 0) {
+                processImportedTransactions(parsedTxs, file);
+            } else {
+                alert("No valid transactions found in the Excel file.");
             }
         } catch (error) {
             console.error(error);
@@ -1114,6 +1282,207 @@ document.getElementById('excelFileInput').addEventListener('change', function (e
     reader.readAsArrayBuffer(file);
     e.target.value = ''; // reset
 });
+
+// PDF Parsing Logic
+async function parseCanaraBankPDF(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const typedarray = new Uint8Array(e.target.result);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                let fullText = "";
+                
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    let lastY = -1;
+                    textContent.items.forEach(item => {
+                        if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+                            fullText += "\n";
+                        }
+                        fullText += item.str + " ";
+                        lastY = item.transform[5];
+                    });
+                    fullText += "\n\n--- PAGE BREAK ---\n\n";
+                }
+                
+                let currentTx = null;
+                const parsedTxs = [];
+                const lines = fullText.split('\n');
+                
+                const finalizeTx = (tx) => {
+                    tx.narration = tx.narration.trim();
+                    let type = 'expense';
+                    if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr')) {
+                        type = 'income';
+                    }
+                    const dParts = tx.dateStr.split('-');
+                    if (dParts.length === 3) {
+                        const isoDate = `${dParts[2]}-${dParts[1]}-${dParts[0]}`;
+                        parsedTxs.push({ date: isoDate, title: tx.narration.substring(0, 80) || 'Bank Transaction', amount: tx.amount, type: type, paymentMethod: 'UPI' });
+                    }
+                };
+
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i].trim();
+                    if (!line || line.includes('PAGE BREAK') || line.includes('Closing Balance')) continue;
+                    
+                    // Remove all spaces for date matching to combat kerning issues
+                    const cleanLine = line.replace(/\s+/g, '');
+
+                    if (/^\d{2}-\d{2}-\d{4}$/.test(cleanLine)) {
+                        if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
+                        currentTx = { dateStr: cleanLine, narration: "", amount: 0 };
+                        continue;
+                    }
+
+                    if (currentTx) {
+                        // Try to match amounts at the end of the line
+                        // Often pdf.js concatenates columns like "100.00 5,000.00"
+                        const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
+                        if (amounts && amounts.length >= 2 && !line.includes('Balance')) {
+                            // The second to last amount is the transaction amount. The last is the running balance.
+                            const txAmtStr = amounts[amounts.length - 2].replace(/[^0-9.]/g, '');
+                            currentTx.amount = parseFloat(txAmtStr);
+                            
+                            const txAmtRaw = amounts[amounts.length - 2];
+                            const lastAmtIndex = line.lastIndexOf(txAmtRaw);
+                            let narrationPart = line.substring(0, lastAmtIndex).trim();
+                            currentTx.narration += " " + narrationPart;
+                            
+                            finalizeTx(currentTx);
+                            currentTx = null;
+                        } else if (amounts && amounts.length === 1 && !line.includes('Balance')) {
+                            const amtStr = amounts[0].replace(/[^0-9.]/g, '');
+                            currentTx.amount = parseFloat(amtStr);
+                            const lastAmtIndex = line.lastIndexOf(amounts[0]);
+                            let narrationPart = line.substring(0, lastAmtIndex).trim();
+                            currentTx.narration += " " + narrationPart;
+                            
+                            finalizeTx(currentTx);
+                            currentTx = null;
+                        } else {
+                            currentTx.narration += " " + line;
+                        }
+                    }
+                }
+                if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
+                resolve(parsedTxs);
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+// Deduplication and Firebase Upload Logic
+function processImportedTransactions(parsedTxs, fileObj) {
+    if (!currentUser) return;
+    
+    if (!categories.includes('Uncategorized')) {
+        categories.push('Uncategorized');
+        saveCategories();
+        populateCategoryDropdowns();
+    }
+
+    let importedCount = 0;
+    let skippedCount = 0;
+    const batch = db.batch();
+    
+    parsedTxs.forEach(tx => {
+        const isDuplicate = transactions.some(existing => {
+            const sameDate = existing.date === tx.date;
+            const sameAmount = Math.abs(existing.amount - tx.amount) < 0.01;
+            const existingTitle = existing.originalTitle || existing.title;
+            const sameTitle = existingTitle.toLowerCase().trim() === tx.title.toLowerCase().trim();
+            return sameDate && sameAmount && sameTitle;
+        });
+        
+        if (isDuplicate) {
+            skippedCount++;
+        } else {
+            const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+            const newTx = {
+                id: newId,
+                accountId: activeAccountId,
+                type: tx.type,
+                paymentMethod: tx.paymentMethod || 'UPI',
+                amount: tx.amount,
+                title: tx.title,
+                originalTitle: tx.title,
+                category: 'Uncategorized',
+                date: tx.date
+            };
+            batch.set(db.collection('users').doc(currentUser.uid).collection('transactions').doc(newId), newTx);
+            importedCount++;
+        }
+    });
+    
+    if (importedCount > 0) {
+        batch.commit().then(() => {
+            const summaryModal = document.getElementById('importSummaryModal');
+            document.getElementById('importSummaryMsg').innerText = `Successfully added ${importedCount} new transactions. Skipped ${skippedCount} duplicates.`;
+            openModal(summaryModal);
+            uploadFileToHistory(fileObj);
+        }).catch(err => alert("Error importing: " + err.message));
+    } else {
+        const summaryModal = document.getElementById('importSummaryModal');
+        document.getElementById('importSummaryMsg').innerText = `No new transactions added. Skipped ${skippedCount} duplicates.`;
+        openModal(summaryModal);
+        uploadFileToHistory(fileObj);
+    }
+}
+
+function uploadFileToHistory(file) {
+    if (!currentUser || !file) return;
+    const storageRef = firebase.storage().ref();
+    const timestamp = Date.now();
+    const fileRef = storageRef.child(`users/${currentUser.uid}/imports/${timestamp}_${file.name}`);
+    
+    console.log("Uploading file to history...");
+    fileRef.put(file).then((snapshot) => {
+        return snapshot.ref.getDownloadURL();
+    }).then((url) => {
+        const historyDoc = {
+            fileName: file.name,
+            timestamp: timestamp,
+            url: url
+        };
+        db.collection('users').doc(currentUser.uid).collection('importHistory').add(historyDoc);
+    }).catch(err => console.error("Error uploading file:", err));
+}
+
+function renderImportHistory() {
+    const list = document.getElementById('importHistoryList');
+    const noMsg = document.getElementById('noHistoryMsg');
+    if (!list || !noMsg) return;
+    
+    list.innerHTML = '';
+    
+    if (importHistory.length === 0) {
+        list.style.display = 'none';
+        noMsg.style.display = 'block';
+    } else {
+        list.style.display = 'flex';
+        noMsg.style.display = 'none';
+        
+        importHistory.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'category-item';
+            const dateStr = new Date(item.timestamp).toLocaleString();
+            li.innerHTML = `
+                <div style="display:flex; flex-direction:column; gap:4px; max-width: 80%;">
+                    <span style="font-weight:600; font-size:0.95rem; word-break: break-all;">${item.fileName}</span>
+                    <span style="font-size:0.75rem; color:var(--text-secondary);">${dateStr}</span>
+                </div>
+                <a href="${item.url}" target="_blank" class="icon-btn" title="View/Download" style="text-decoration:none;"><i class="fa-solid fa-download"></i></a>
+            `;
+            list.appendChild(li);
+        });
+    }
+}
 
 // Start
 init();

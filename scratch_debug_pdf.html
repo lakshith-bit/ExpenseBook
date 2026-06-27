@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+</head>
+<body>
+    <input type="file" id="file" />
+    <pre id="output"></pre>
+    <script>
+        document.getElementById('file').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const typedarray = new Uint8Array(e.target.result);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                let fullText = "";
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    let lastY = -1;
+                    textContent.items.forEach(item => {
+                        if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+                            fullText += "\n";
+                        }
+                        fullText += item.str + " ";
+                        lastY = item.transform[5];
+                    });
+                    fullText += "\n\n--- PAGE BREAK ---\n\n";
+                }
+                
+                const lines = fullText.split('\n');
+                let debugOut = "";
+                for(let i=0; i<Math.min(50, lines.length); i++) {
+                    debugOut += `[${i}] '${lines[i]}'\n`;
+                }
+                
+                let currentTx = null;
+                const parsedTxs = [];
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line || line.includes('PAGE BREAK') || line.includes('Closing Balance')) continue;
+                    if (/^\d{2}-\d{2}-\d{4}$/.test(line)) {
+                        if (currentTx && currentTx.amount > 0) parsedTxs.push(currentTx);
+                        currentTx = { dateStr: line, narration: "", amount: 0 };
+                        continue;
+                    }
+                    if (currentTx) {
+                        if (line.startsWith('Chq:')) continue;
+                        else if (/^[\d,]+\.\d{2}\s+[\d,]+\.\d{2}$/.test(line)) {
+                            const parts = line.split(/\s+/);
+                            currentTx.amount = parseFloat(parts[0].replace(/,/g, ''));
+                        } else {
+                            currentTx.narration += line + " ";
+                        }
+                    }
+                }
+                if (currentTx && currentTx.amount > 0) parsedTxs.push(currentTx);
+                
+                debugOut += "\nParsed count: " + parsedTxs.length + "\n";
+                document.getElementById('output').innerText = debugOut;
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    </script>
+</body>
+</html>
