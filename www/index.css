@@ -847,6 +847,71 @@ input[id="typeIncome"]:checked + label { color: var(--income); border-color: rgb
 .dropdown-content .btn:hover { background: var(--bg-color); }
 .dropdown-content .btn i { width: 20px; color: var(--text-secondary); text-align: center; margin-right: 4px; }
 
+/* Custom Header Selectors */
+#accountDropdownBtn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 20px; /* Pill shape */
+    padding: 8px 16px;
+    color: #ffffff;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+#accountDropdownBtn:hover {
+    background: #273549;
+}
+[data-theme="light"] #accountDropdownBtn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+}
+[data-theme="light"] #accountDropdownBtn:hover {
+    background: #e2e8f0;
+}
+
+#menuDropdownBtn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    color: #ffffff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+#menuDropdownBtn:hover {
+    background: #273549;
+    transform: translateY(-2px);
+}
+[data-theme="light"] #menuDropdownBtn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+}
+[data-theme="light"] #menuDropdownBtn:hover {
+    background: #e2e8f0;
+}
+
+/* Align filter dropdowns */
+.filter-group .dropdown-container {
+    width: 100%;
+    display: block;
+}
+.filter-group .dropdown-content {
+    width: 100%;
+    left: 0;
+    right: 0;
+    top: 105%;
+}
 
 /* Option styles for dropdowns to respect theme colors */
 select option,

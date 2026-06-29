@@ -29,16 +29,22 @@
             <div class="header-content">
                 <h1>ExpenseBook</h1>
                 <div class="header-actions">
-                    <div class="account-selector-header-container"
-                        style="display: flex; align-items: center; gap: 0.4rem; position: relative; background: var(--surface); padding: 0.4rem 0.8rem; border-radius: 10px; border: 1px solid var(--border); min-width: 140px; max-width: 220px; box-sizing: border-box;">
-                        <i class="fa-solid fa-wallet" style="color: var(--primary); font-size: 0.85rem;"></i>
-                        <select id="accountSelector"
-                            style="border: none; background: transparent; color: var(--text-primary); font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.9rem; padding: 0.1rem 1.2rem 0.1rem 0; flex: 1; outline: none; appearance: none; -webkit-appearance: none; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; width: 100%;">
-                            <!-- Accounts injected by JS -->
-                        </select>
-                        <i class="fa-solid fa-chevron-down"
-                            style="position: absolute; right: 8px; font-size: 0.65rem; color: var(--text-secondary); pointer-events: none;"></i>
+                    <!-- Hidden account selector to preserve JS hooks -->
+                    <select id="accountSelector" style="display: none;"></select>
+
+                    <div class="dropdown-container" id="accountDropdownContainer" style="position: relative;">
+                        <button type="button" id="accountDropdownBtn">
+                            <span style="display: flex; align-items: center; gap: 0.4rem; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 150px;">
+                                <i class="fa-solid fa-wallet" style="color: var(--primary); font-size: 0.85rem;"></i>
+                                <span id="activeAccountNameText">Personal</span>
+                            </span>
+                            <i class="fa-solid fa-chevron-down" style="font-size: 0.65rem; color: var(--text-secondary); margin-left: 4px;"></i>
+                        </button>
+                        <div id="accountDropdown" class="dropdown-content hidden">
+                            <!-- Options injected by JS -->
+                        </div>
                     </div>
+
                     <div class="dropdown-container" style="position: relative;">
                         <button id="menuDropdownBtn" class="icon-btn" title="Menu"
                             onclick="document.getElementById('menuDropdown').classList.toggle('hidden')"><i
@@ -72,9 +78,10 @@
             </div>
         </header>
 
+        <p id="lastUpdatedText" class="last-updated" style="text-align: center; margin-top: 12px; margin-bottom: 4px; font-size: 0.8rem; color: var(--text-secondary);">Last updated on: -</p>
+
         <!-- Dashboard / Summary Cards -->
         <section class="dashboard">
-            <p id="lastUpdatedText" class="last-updated">Last updated on: -</p>
             <div class="card balance-card">
                 <h3>Total Balance</h3>
                 <h2 id="totalBalance">₹0</h2>
@@ -124,16 +131,39 @@
                         onclick="this.type='date'; if(this.showPicker) this.showPicker();"
                         onblur="(this.value == '' ? this.type='text' : this.type='date')">
 
-                    <select id="filterTxType" class="select-input" title="Transaction Type">
+                    <!-- Hidden selectors to preserve JS hooks -->
+                    <select id="filterTxType" style="display: none;">
                         <option value="all">All Types</option>
                         <option value="income">Amount Received</option>
                         <option value="expense">Amount Sent</option>
                     </select>
-                    <select id="filterPaymentMethod" class="select-input" title="Payment Method">
+                    <select id="filterPaymentMethod" style="display: none;">
                         <option value="all">All Methods</option>
                         <option value="UPI">UPI</option>
                         <option value="Cash">Cash</option>
                     </select>
+
+                    <div class="dropdown-container" id="txTypeDropdownContainer">
+                        <div id="txTypeDropdownBtn" class="select-input" style="display: flex; align-items: center; justify-content: space-between; width: 100%; cursor: pointer;">
+                            <span id="activeTxTypeText">All Types</span>
+                        </div>
+                        <div id="txTypeDropdown" class="dropdown-content hidden">
+                            <button type="button" class="btn tx-type-option" data-value="all">All Types</button>
+                            <button type="button" class="btn tx-type-option" data-value="income">Amount Received</button>
+                            <button type="button" class="btn tx-type-option" data-value="expense">Amount Sent</button>
+                        </div>
+                    </div>
+
+                    <div class="dropdown-container" id="paymentMethodDropdownContainer">
+                        <div id="paymentMethodDropdownBtn" class="select-input" style="display: flex; align-items: center; justify-content: space-between; width: 100%; cursor: pointer;">
+                            <span id="activePaymentMethodText">All Methods</span>
+                        </div>
+                        <div id="paymentMethodDropdown" class="dropdown-content hidden">
+                            <button type="button" class="btn payment-method-option" data-value="all">All Methods</button>
+                            <button type="button" class="btn payment-method-option" data-value="UPI">UPI</button>
+                            <button type="button" class="btn payment-method-option" data-value="Cash">Cash</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

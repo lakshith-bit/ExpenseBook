@@ -176,7 +176,88 @@ document.addEventListener('click', (e) => {
     if (menuDropdown && !menuDropdown.classList.contains('hidden') && !menuDropdown.contains(e.target) && !menuDropdownBtn.contains(e.target)) {
         menuDropdown.classList.add('hidden');
     }
-});accountSelector.addEventListener('change', (e) => {
+
+    const accountDropdown = document.getElementById('accountDropdown');
+    const accountDropdownBtn = document.getElementById('accountDropdownBtn');
+    if (accountDropdown && !accountDropdown.classList.contains('hidden') && !accountDropdown.contains(e.target) && !accountDropdownBtn.contains(e.target)) {
+        accountDropdown.classList.add('hidden');
+    }
+
+    const txTypeDropdown = document.getElementById('txTypeDropdown');
+    const txTypeDropdownBtn = document.getElementById('txTypeDropdownBtn');
+    if (txTypeDropdown && !txTypeDropdown.classList.contains('hidden') && !txTypeDropdown.contains(e.target) && !txTypeDropdownBtn.contains(e.target)) {
+        txTypeDropdown.classList.add('hidden');
+    }
+
+    const paymentMethodDropdown = document.getElementById('paymentMethodDropdown');
+    const paymentMethodDropdownBtn = document.getElementById('paymentMethodDropdownBtn');
+    if (paymentMethodDropdown && !paymentMethodDropdown.classList.contains('hidden') && !paymentMethodDropdown.contains(e.target) && !paymentMethodDropdownBtn.contains(e.target)) {
+        paymentMethodDropdown.classList.add('hidden');
+    }
+});
+
+const accountDropdownBtn = document.getElementById('accountDropdownBtn');
+const accountDropdown = document.getElementById('accountDropdown');
+if (accountDropdownBtn && accountDropdown) {
+    accountDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        accountDropdown.classList.toggle('hidden');
+        document.getElementById('txTypeDropdown').classList.add('hidden');
+        document.getElementById('paymentMethodDropdown').classList.add('hidden');
+        document.getElementById('multiSelectDropdown').classList.add('hidden');
+        document.getElementById('menuDropdown').classList.add('hidden');
+    });
+}
+
+const txTypeDropdownBtn = document.getElementById('txTypeDropdownBtn');
+const txTypeDropdown = document.getElementById('txTypeDropdown');
+const activeTxTypeText = document.getElementById('activeTxTypeText');
+if (txTypeDropdownBtn && txTypeDropdown) {
+    txTypeDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        txTypeDropdown.classList.toggle('hidden');
+        if (accountDropdown) accountDropdown.classList.add('hidden');
+        document.getElementById('paymentMethodDropdown').classList.add('hidden');
+        document.getElementById('multiSelectDropdown').classList.add('hidden');
+        document.getElementById('menuDropdown').classList.add('hidden');
+    });
+
+    document.querySelectorAll('.tx-type-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const val = btn.getAttribute('data-value');
+            if (activeTxTypeText) activeTxTypeText.innerText = btn.innerText;
+            filterTxTypeEl.value = val;
+            txTypeDropdown.classList.add('hidden');
+            renderTransactions();
+        });
+    });
+}
+
+const paymentMethodDropdownBtn = document.getElementById('paymentMethodDropdownBtn');
+const paymentMethodDropdown = document.getElementById('paymentMethodDropdown');
+const activePaymentMethodText = document.getElementById('activePaymentMethodText');
+if (paymentMethodDropdownBtn && paymentMethodDropdown) {
+    paymentMethodDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        paymentMethodDropdown.classList.toggle('hidden');
+        if (accountDropdown) accountDropdown.classList.add('hidden');
+        txTypeDropdown.classList.add('hidden');
+        document.getElementById('multiSelectDropdown').classList.add('hidden');
+        document.getElementById('menuDropdown').classList.add('hidden');
+    });
+
+    document.querySelectorAll('.payment-method-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const val = btn.getAttribute('data-value');
+            if (activePaymentMethodText) activePaymentMethodText.innerText = btn.innerText;
+            filterPaymentMethodEl.value = val;
+            paymentMethodDropdown.classList.add('hidden');
+            renderTransactions();
+        });
+    });
+}
+
+accountSelector.addEventListener('change', (e) => {
     activeAccountId = e.target.value;
     localStorage.setItem('expensebook_active_account', activeAccountId);
     updateDashboard();
@@ -704,6 +785,35 @@ function populateAccountSelector() {
         accountSelector.add(new Option(acc.name, acc.id));
     });
     accountSelector.value = activeAccountId;
+
+    // Custom dropdown rendering
+    const accountDropdown = document.getElementById('accountDropdown');
+    const activeAccountNameText = document.getElementById('activeAccountNameText');
+    if (accountDropdown) {
+        accountDropdown.innerHTML = '';
+        accounts.forEach(acc => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn account-option';
+            btn.setAttribute('data-value', acc.id);
+            btn.innerHTML = `<i class="fa-solid fa-wallet" style="font-size: 0.85rem; color: var(--primary);"></i> ${acc.name}`;
+            btn.addEventListener('click', () => {
+                activeAccountId = acc.id;
+                localStorage.setItem('expensebook_active_account', activeAccountId);
+                if (activeAccountNameText) activeAccountNameText.innerText = acc.name;
+                accountDropdown.classList.add('hidden');
+                accountSelector.value = activeAccountId; // Keep hidden select synced
+                updateDashboard();
+                renderTransactions();
+            });
+            accountDropdown.appendChild(btn);
+        });
+    }
+
+    const currentAcc = accounts.find(a => a.id === activeAccountId);
+    if (currentAcc && activeAccountNameText) {
+        activeAccountNameText.innerText = currentAcc.name;
+    }
 }
 
 function deleteAccount(id) {
@@ -1078,9 +1188,9 @@ document.getElementById('excelFileInput').addEventListener('change', async funct
 
     if (file.name.toLowerCase().endsWith('.pdf')) {
         try {
-            const parsedTxs = await parseCanaraBankPDF(file);
+            const parsedTxs = await parsePDFStatement(file);
             if (parsedTxs.length === 0) {
-                alert("No transactions found in this PDF. Ensure it is a Canara Bank format.");
+                alert("No transactions found in this PDF. Ensure it is a Canara Bank or ExpenseBook statement.");
             } else {
                 processImportedTransactions(parsedTxs, file);
             }
@@ -1225,14 +1335,13 @@ document.getElementById('excelFileInput').addEventListener('change', async funct
     e.target.value = ''; // reset
 });
 
-// PDF Parsing Logic
-async function parseCanaraBankPDF(file) {
+// Unified PDF parsing entry point
+async function parsePDFStatement(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
                 const typedarray = new Uint8Array(e.target.result);
-                // Ensure worker is configured
                 if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
                 }
@@ -1253,108 +1362,176 @@ async function parseCanaraBankPDF(file) {
                     fullText += "\n\n--- PAGE BREAK ---\n\n";
                 }
                 
-                let currentTx = null;
-                const parsedTxs = [];
-                const lines = fullText.split('\n');
-                
-                // Track running balance to mathematically determine transaction type (income/expense)
-                let lastRunningBalance = null;
-                
-                // Find Opening Balance
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (line.toLowerCase().includes('opening balance')) {
-                        const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
-                        if (amounts && amounts.length > 0) {
-                            lastRunningBalance = parseFloat(amounts[amounts.length - 1].replace(/[^0-9.]/g, ''));
-                            break;
-                        }
-                    }
+                if (fullText.includes("ExpenseBook Statement")) {
+                    const txs = parseExpenseBookPDFText(fullText);
+                    resolve(txs);
+                } else {
+                    const txs = parseCanaraBankPDFText(fullText);
+                    resolve(txs);
                 }
-                
-                const finalizeTx = (tx) => {
-                    tx.narration = tx.narration.trim();
-                    let type = 'expense';
-                    
-                    if (lastRunningBalance !== null && tx.runningBalance !== null) {
-                        const diff = tx.runningBalance - lastRunningBalance;
-                        if (Math.abs(diff - tx.amount) < 0.02) {
-                            type = 'income';
-                        } else if (Math.abs(diff + tx.amount) < 0.02) {
-                            type = 'expense';
-                        } else {
-                            // Fallback
-                            if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
-                                type = 'income';
-                            }
-                        }
-                        lastRunningBalance = tx.runningBalance;
-                    } else {
-                        if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
-                            type = 'income';
-                        }
-                        if (tx.runningBalance !== null) {
-                            lastRunningBalance = tx.runningBalance;
-                        }
-                    }
-                    
-                    const dParts = tx.dateStr.split('-');
-                    if (dParts.length === 3) {
-                        const isoDate = `${dParts[2]}-${dParts[1]}-${dParts[0]}`;
-                        parsedTxs.push({ date: isoDate, title: tx.narration.substring(0, 80) || 'Bank Transaction', amount: tx.amount, type: type, paymentMethod: 'UPI' });
-                    }
-                };
-
-                for (let i = 0; i < lines.length; i++) {
-                    let line = lines[i].trim();
-                    if (!line || line.includes('PAGE BREAK') || line.includes('Closing Balance')) continue;
-                    
-                    const cleanLine = line.replace(/\s+/g, '');
-
-                    if (/^\d{2}-\d{2}-\d{4}$/.test(cleanLine)) {
-                        if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
-                        currentTx = { dateStr: cleanLine, narration: "", amount: 0, runningBalance: null };
-                        continue;
-                    }
-
-                    if (currentTx) {
-                        const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
-                        if (amounts && amounts.length >= 2 && !line.includes('Balance')) {
-                            const txAmtStr = amounts[amounts.length - 2].replace(/[^0-9.]/g, '');
-                            currentTx.amount = parseFloat(txAmtStr);
-                            
-                            const runningBalStr = amounts[amounts.length - 1].replace(/[^0-9.]/g, '');
-                            currentTx.runningBalance = parseFloat(runningBalStr);
-                            
-                            const txAmtRaw = amounts[amounts.length - 2];
-                            const lastAmtIndex = line.lastIndexOf(txAmtRaw);
-                            let narrationPart = line.substring(0, lastAmtIndex).trim();
-                            currentTx.narration += " " + narrationPart;
-                            
-                            finalizeTx(currentTx);
-                            currentTx = null;
-                        } else if (amounts && amounts.length === 1 && !line.includes('Balance')) {
-                            const amtStr = amounts[0].replace(/[^0-9.]/g, '');
-                            currentTx.amount = parseFloat(amtStr);
-                            const lastAmtIndex = line.lastIndexOf(amounts[0]);
-                            let narrationPart = line.substring(0, lastAmtIndex).trim();
-                            currentTx.narration += " " + narrationPart;
-                            
-                            finalizeTx(currentTx);
-                            currentTx = null;
-                        } else {
-                            currentTx.narration += " " + line;
-                        }
-                    }
-                }
-                if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
-                resolve(parsedTxs);
             } catch (err) {
                 reject(err);
             }
         };
         reader.readAsArrayBuffer(file);
     });
+}
+
+function parseExpenseBookPDFText(fullText) {
+    const parsedTxs = [];
+    const lines = fullText.split('\n');
+    const txRegex = /^\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(.*?)\s+(Income|Expense)\s+([+-]\s*(?:Rs\.|₹|INR)?\s*([\d,]+\.\d{2}))/i;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const match = line.match(txRegex);
+        if (match) {
+            const dateStr = match[1];
+            const detailStr = match[2];
+            const typeStr = match[3].toLowerCase();
+            const rawAmountNum = match[5];
+            
+            const parsedDate = new Date(dateStr);
+            if (isNaN(parsedDate.getTime())) continue;
+            
+            const yearStr = parsedDate.getFullYear();
+            const monthStr = String(parsedDate.getMonth() + 1).padStart(2, '0');
+            const dayStr = String(parsedDate.getDate()).padStart(2, '0');
+            const isoDate = `${yearStr}-${monthStr}-${dayStr}`;
+            
+            const amount = parseFloat(rawAmountNum.replace(/,/g, ''));
+            if (isNaN(amount) || amount <= 0) continue;
+            
+            const parts = detailStr.split(/\s{2,}/).map(p => p.trim()).filter(Boolean);
+            let title = '';
+            let category = 'Uncategorized';
+            let paymentMethod = 'UPI';
+            
+            if (parts.length >= 3) {
+                title = parts[0];
+                category = parts[1];
+                paymentMethod = parts[2];
+            } else if (parts.length === 2) {
+                title = parts[0];
+                paymentMethod = parts[1];
+                category = parts[0];
+            } else if (parts.length === 1) {
+                title = parts[0];
+            }
+            
+            if (title === 'Opening Balance' && category === 'Opening Balance') {
+                continue;
+            }
+            
+            parsedTxs.push({
+                date: isoDate,
+                title: title || 'ExpenseBook Transaction',
+                category: category,
+                amount: amount,
+                type: typeStr,
+                paymentMethod: paymentMethod
+            });
+        }
+    }
+    return parsedTxs;
+}
+
+function parseCanaraBankPDFText(fullText) {
+    let currentTx = null;
+    const parsedTxs = [];
+    const lines = fullText.split('\n');
+    
+    let lastRunningBalance = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.toLowerCase().includes('opening balance')) {
+            const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
+            if (amounts && amounts.length > 0) {
+                lastRunningBalance = parseFloat(amounts[amounts.length - 1].replace(/[^0-9.]/g, ''));
+                break;
+            }
+        }
+    }
+    
+    const finalizeTx = (tx) => {
+        tx.narration = tx.narration.trim();
+        let type = 'expense';
+        
+        if (lastRunningBalance !== null && tx.runningBalance !== null) {
+            const diff = tx.runningBalance - lastRunningBalance;
+            if (Math.abs(diff - tx.amount) < 0.02) {
+                type = 'income';
+            } else if (Math.abs(diff + tx.amount) < 0.02) {
+                type = 'expense';
+            } else {
+                if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
+                    type = 'income';
+                }
+            }
+            lastRunningBalance = tx.runningBalance;
+        } else {
+            if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
+                type = 'income';
+            }
+            if (tx.runningBalance !== null) {
+                lastRunningBalance = tx.runningBalance;
+            }
+        }
+        
+        const dParts = tx.dateStr.split('-');
+        if (dParts.length === 3) {
+            const isoDate = `${dParts[2]}-${dParts[1]}-${dParts[0]}`;
+            parsedTxs.push({ date: isoDate, title: tx.narration.substring(0, 80) || 'Bank Transaction', amount: tx.amount, type: type, paymentMethod: 'UPI' });
+        }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        if (!line || line.includes('PAGE BREAK') || line.includes('Closing Balance')) continue;
+        
+        const cleanLine = line.replace(/\s+/g, '');
+
+        if (/^\d{2}-\d{2}-\d{4}$/.test(cleanLine)) {
+            if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
+            currentTx = { dateStr: cleanLine, narration: "", amount: 0, runningBalance: null };
+            continue;
+        }
+
+        if (currentTx) {
+            const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
+            if (amounts && amounts.length >= 2 && !line.includes('Balance')) {
+                const txAmtStr = amounts[amounts.length - 2].replace(/[^0-9.]/g, '');
+                currentTx.amount = parseFloat(txAmtStr);
+                
+                const runningBalStr = amounts[amounts.length - 1].replace(/[^0-9.]/g, '');
+                currentTx.runningBalance = parseFloat(runningBalStr);
+                
+                const txAmtRaw = amounts[amounts.length - 2];
+                const lastAmtIndex = line.lastIndexOf(txAmtRaw);
+                let narrationPart = line.substring(0, lastAmtIndex).trim();
+                currentTx.narration += " " + narrationPart;
+                
+                finalizeTx(currentTx);
+                currentTx = null;
+            } else if (amounts && amounts.length === 1 && !line.includes('Balance')) {
+                const amtStr = amounts[0].replace(/[^0-9.]/g, '');
+                currentTx.amount = parseFloat(amtStr);
+                const lastAmtIndex = line.lastIndexOf(amounts[0]);
+                let narrationPart = line.substring(0, lastAmtIndex).trim();
+                currentTx.narration += " " + narrationPart;
+                
+                finalizeTx(currentTx);
+                currentTx = null;
+            } else {
+                currentTx.narration += " " + line;
+            }
+        }
+    }
+    if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
+    return parsedTxs;
 }
 
 // Deduplication and Local Save Logic
@@ -1364,6 +1541,20 @@ function processImportedTransactions(parsedTxs, fileObj) {
         categories.push('Uncategorized');
         saveCategories();
         populateCategoryDropdowns();
+    }
+
+    // Add categories imported from PDF/Excel that don't exist yet
+    let categoriesChanged = false;
+    parsedTxs.forEach(tx => {
+        if (tx.category && tx.category !== 'Opening Balance' && !categories.includes(tx.category)) {
+            categories.push(tx.category);
+            categoriesChanged = true;
+        }
+    });
+    if (categoriesChanged) {
+        saveCategories();
+        populateCategoryDropdowns();
+        renderCategoryList();
     }
 
     let importedCount = 0;
@@ -1390,7 +1581,7 @@ function processImportedTransactions(parsedTxs, fileObj) {
                 amount: tx.amount,
                 title: tx.title,
                 originalTitle: tx.title,
-                category: 'Uncategorized',
+                category: tx.category || 'Uncategorized',
                 date: tx.date
             };
             transactions.push(newTx);
