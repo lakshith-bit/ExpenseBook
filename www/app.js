@@ -1,28 +1,9 @@
-const firebaseConfig = {
-    apiKey: "AIzaSyDgvaj_gbVaBHNBwvimXH7pstAywHEExes",
-    authDomain: "expensebook-lucky.firebaseapp.com",
-    projectId: "expensebook-lucky",
-    storageBucket: "expensebook-lucky.firebasestorage.app",
-    messagingSenderId: "143835058116",
-    appId: "1:143835058116:web:0a3e68dcc78c49b4061e91",
-    measurementId: "G-REYPT7EC1H"
-};
-
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
-
-let currentUser = null;
-let unsubscribeAccounts = null;
-let unsubscribeTransactions = null;
-let unsubscribeHistory = null;
-
 let importHistory = [];
 let accounts = [];
-let activeAccountId = localStorage.getItem('expensebook_active_account') || 'acc_default';
-
+let activeAccountId = 'acc_default';
 let transactions = [];
-let categories = JSON.parse(localStorage.getItem('expensebook_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
+let categories = [];
+let nicknames = JSON.parse(localStorage.getItem('expensebook_nicknames')) || [];
 let lastUpdated = null;
 
 // DOM Elements
@@ -43,11 +24,14 @@ let selectedCategories = [];
 let currentFilteredTransactions = [];
 
 // Modals
+const transactionModal = document.getElementById('transactionModal');
 const categoriesModal = document.getElementById('categoriesModal');
 const accountsModal = document.getElementById('accountsModal');
 const deleteConfirmModal = document.getElementById('deleteConfirmModal');
+const deleteAccountConfirmModal = document.getElementById('deleteAccountConfirmModal');
 const importHistoryModal = document.getElementById('importHistoryModal');
 let transactionToDelete = null;
+let accountToDelete = null;
 
 let lastAddedTx = null; // Remembers the last added transaction's details
 
@@ -58,10 +42,10 @@ let currentTheme = localStorage.getItem('expensebook_theme') || 'dark';
 function applyTheme(theme) {
     if (theme === 'light') {
         document.documentElement.setAttribute('data-theme', 'light');
-        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-sun"></i>';
+        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-sun" style="width: 20px;"></i> Toggle Theme';
     } else {
         document.documentElement.removeAttribute('data-theme');
-        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-moon"></i>';
+        if(themeToggleBtn) themeToggleBtn.innerHTML = '<i class="fa-solid fa-moon" style="width: 20px;"></i> Toggle Theme';
     }
 }
 
@@ -79,232 +63,68 @@ if(themeToggleBtn) {
 }
 applyTheme(currentTheme);
 
-// Phone Auth Variables
-let confirmationResult = null;
-let recaptchaVerifier = null;
-
-// Init & Firebase Auth
+// Init & Local Data Load
 function init() {
+    // Load accounts
+    const savedAccounts = localStorage.getItem('expensebook_accounts');
+    if (savedAccounts) {
+        accounts = JSON.parse(savedAccounts);
+    } else {
+        accounts = [{ id: 'acc_default', name: 'Personal' }];
+        localStorage.setItem('expensebook_accounts', JSON.stringify(accounts));
+    }
+    
+    // Load active account ID
+    activeAccountId = localStorage.getItem('expensebook_active_account') || 'acc_default';
+    if (!accounts.find(a => a.id === activeAccountId)) {
+        activeAccountId = accounts[0].id;
+        localStorage.setItem('expensebook_active_account', activeAccountId);
+    }
+    
+    // Load transactions
+    const savedTransactions = localStorage.getItem('expensebook_transactions');
+    if (savedTransactions) {
+        transactions = JSON.parse(savedTransactions);
+    } else {
+        transactions = [];
+        localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+    }
+    
+    // Sort transactions
+    sortTransactions();
+
+    // Load importHistory
+    const savedHistory = localStorage.getItem('expensebook_import_history');
+    if (savedHistory) {
+        importHistory = JSON.parse(savedHistory);
+    } else {
+        importHistory = [];
+        localStorage.setItem('expensebook_import_history', JSON.stringify(importHistory));
+    }
+    
+    // Populate categories
+    categories = JSON.parse(localStorage.getItem('expensebook_categories')) || ['Food', 'Personal', 'Transport', 'Utilities', 'Entertainment', 'Salary'];
+    if (!localStorage.getItem('expensebook_categories')) {
+        localStorage.setItem('expensebook_categories', JSON.stringify(categories));
+    }
+
     populateCategoryDropdowns();
     renderCategoryList();
+    populateAccountSelector();
+    renderAccountList();
     
-    // Initialize Recaptcha (Visible to avoid popup blockers/z-index issues)
-    recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
-        'size': 'normal',
-        'callback': (response) => {
-            // reCAPTCHA solved, enable Send OTP button
-            const btn = document.getElementById('sendOtpBtn');
-            btn.disabled = false;
-            btn.style.opacity = '1';
-        },
-        'expired-callback': () => {
-            // Response expired. Ask user to solve reCAPTCHA again.
-            const btn = document.getElementById('sendOtpBtn');
-            btn.disabled = true;
-            btn.style.opacity = '0.7';
-        }
-    });
-    recaptchaVerifier.render();
-
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            currentUser = user;
-            document.getElementById('loginOverlay').style.display = 'none';
-            document.getElementById('mainApp').style.display = 'block';
-            
-            // Reset Phone Auth UI just in case
-            document.getElementById('phoneAuthContainer').style.display = 'flex';
-            document.getElementById('otpAuthContainer').style.display = 'none';
-            document.getElementById('phoneNumberInput').value = '';
-            document.getElementById('otpInput').value = '';
-            
-            migrateLocalData().then(() => {
-                loadDataFromFirestore();
-            });
-        } else {
-            currentUser = null;
-            document.getElementById('loginOverlay').style.display = 'flex';
-            document.getElementById('mainApp').style.display = 'none';
-            
-            if (unsubscribeAccounts) unsubscribeAccounts();
-            if (unsubscribeTransactions) unsubscribeTransactions();
-            if (unsubscribeHistory) unsubscribeHistory();
-        }
-    });
+    lastUpdated = new Date().toLocaleString();
+    if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+    
+    updateDashboard();
+    renderTransactions();
 }
 
-document.getElementById('sendOtpBtn').addEventListener('click', () => {
-    const countryCode = document.getElementById('countryCodeInput').value.trim();
-    let phoneNum = document.getElementById('phoneNumberInput').value.trim();
-    
-    if (!phoneNum) {
-        alert("Please enter a valid phone number.");
-        return;
-    }
-
-    // Clean phone number: remove non-digits
-    let digitsOnly = phoneNum.replace(/\D/g, '');
-    // Clean country code digits
-    let codeDigits = countryCode.replace(/\D/g, '');
-
-    // Normalize phone number: if it starts with the country code digits and is longer than 10 digits, strip it
-    if (digitsOnly.startsWith(codeDigits) && digitsOnly.length > 10) {
-        digitsOnly = digitsOnly.substring(codeDigits.length);
-    }
-
-    const fullPhoneNumber = countryCode + digitsOnly;
-    
-    const sendBtn = document.getElementById('sendOtpBtn');
-    sendBtn.innerText = "Sending...";
-    sendBtn.disabled = true;
-
-    auth.signInWithPhoneNumber(fullPhoneNumber, recaptchaVerifier)
-        .then((result) => {
-            confirmationResult = result;
-            document.getElementById('phoneAuthContainer').style.display = 'none';
-            document.getElementById('otpAuthContainer').style.display = 'flex';
-        })
-        .catch((error) => {
-            console.error("SMS not sent", error);
-            alert("Error sending OTP. Please try again. " + error.message);
-            // Reset Recaptcha if it fails
-            if (recaptchaVerifier) recaptchaVerifier.render().then(widgetId => grecaptcha.reset(widgetId));
-        })
-        .finally(() => {
-            sendBtn.innerText = "Send OTP";
-            sendBtn.disabled = false;
-        });
-});
-
-document.getElementById('verifyOtpBtn').addEventListener('click', () => {
-    const code = document.getElementById('otpInput').value.trim();
-    if (code.length !== 6) {
-        alert("Please enter the 6-digit OTP.");
-        return;
-    }
-    
-    const verifyBtn = document.getElementById('verifyOtpBtn');
-    verifyBtn.innerText = "Verifying...";
-    verifyBtn.disabled = true;
-
-    confirmationResult.confirm(code).then((result) => {
-        // User signed in successfully
-        // onAuthStateChanged will handle UI updates
-    }).catch((error) => {
-        console.error("OTP verification failed", error);
-        alert("Invalid OTP. Please try again.");
-    }).finally(() => {
-        verifyBtn.innerText = "Verify & Sign In";
-        verifyBtn.disabled = false;
-    });
-});
-
-document.getElementById('backToPhoneBtn').addEventListener('click', () => {
-    document.getElementById('phoneAuthContainer').style.display = 'flex';
-    document.getElementById('otpAuthContainer').style.display = 'none';
-    document.getElementById('otpInput').value = '';
-    // Reset recaptcha
-    if (recaptchaVerifier) recaptchaVerifier.render().then(widgetId => grecaptcha.reset(widgetId));
-});
-
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    auth.signOut();
-});
-
-async function migrateLocalData() {
-    if (!currentUser) return;
-    let localAccs = JSON.parse(localStorage.getItem('expensebook_accounts'));
-    let localTxs = JSON.parse(localStorage.getItem('expensebook_transactions'));
-    
-    if (localAccs || localTxs) {
-        const batch = db.batch();
-        const userRef = db.collection('users').doc(currentUser.uid);
-        
-        if (localAccs) {
-            localAccs.forEach(acc => {
-                batch.set(userRef.collection('accounts').doc(acc.id), acc);
-            });
-            localStorage.removeItem('expensebook_accounts');
-        }
-        if (localTxs) {
-            localTxs.forEach(tx => {
-                if (!tx.accountId) tx.accountId = 'acc_default';
-                batch.set(userRef.collection('transactions').doc(tx.id), tx);
-            });
-            localStorage.removeItem('expensebook_transactions');
-        }
-        try { await batch.commit(); console.log("Migrated local data to Firestore"); } 
-        catch(e) { console.error("Migration failed: ", e); }
-    }
-}
-
-function loadDataFromFirestore() {
-    const userRef = db.collection('users').doc(currentUser.uid);
-    
-    unsubscribeAccounts = userRef.collection('accounts').onSnapshot(snapshot => {
-        // Ignore initial empty cache snapshots to prevent race conditions or incorrect resets
-        if (snapshot.empty && snapshot.metadata.fromCache) {
-            return;
-        }
-
-        accounts = [];
-        snapshot.forEach(doc => accounts.push(doc.data()));
-        
-        if (snapshot.empty && !snapshot.metadata.fromCache) {
-            const defAcc = { id: 'acc_default', name: 'Personal' };
-            accounts.push(defAcc);
-            userRef.collection('accounts').doc('acc_default').set(defAcc);
-        }
-        
-        if (accounts.length > 0 && !accounts.find(a => a.id === activeAccountId)) {
-            activeAccountId = accounts[0].id;
-            localStorage.setItem('expensebook_active_account', activeAccountId);
-        }
-        
-        populateAccountSelector();
-        renderAccountList();
-        updateDashboard();
-        renderTransactions();
-    });
-
-    unsubscribeTransactions = userRef.collection('transactions').onSnapshot(snapshot => {
-        if (snapshot.empty && snapshot.metadata.fromCache) {
-            return;
-        }
-
-        transactions = [];
-        snapshot.forEach(doc => transactions.push(doc.data()));
-        
-        transactions.sort((a, b) => {
-            const dateDiff = new Date(b.date) - new Date(a.date);
-            if (dateDiff === 0) return b.id.localeCompare(a.id);
-            return dateDiff;
-        });
-
-        lastUpdated = new Date().toLocaleString();
-        if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
-        
-        updateDashboard();
-        renderTransactions();
-    });
-
-    unsubscribeHistory = userRef.collection('importHistory').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
-        if (snapshot.empty && snapshot.metadata.fromCache) {
-            return;
-        }
-
-        importHistory = [];
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            data.id = doc.id;
-            importHistory.push(data);
-        });
-        
-        // Auto-refresh the modal if it's currently open
-        const historyModal = document.getElementById('importHistoryModal');
-        if (historyModal && !historyModal.classList.contains('hidden')) {
-            renderImportHistory();
-        }
+function sortTransactions() {
+    transactions.sort((a, b) => {
+        const dateDiff = new Date(b.date) - new Date(a.date);
+        if (dateDiff === 0) return b.id.localeCompare(a.id);
+        return dateDiff;
     });
 }
 
@@ -335,7 +155,10 @@ document.getElementById('manageCategoriesBtn').addEventListener('click', () => {
     openModal(categoriesModal);
     document.getElementById('menuDropdown').classList.add('hidden');
 });
-document.getElementById('manageAccountsBtn').addEventListener('click', () => openModal(accountsModal));
+document.getElementById('manageAccountsBtn').addEventListener('click', () => {
+    openModal(accountsModal);
+    document.getElementById('menuDropdown').classList.add('hidden');
+});
 document.getElementById('importHistoryBtn').addEventListener('click', () => {
     renderImportHistory();
     openModal(importHistoryModal);
@@ -457,22 +280,29 @@ document.getElementById('transactionForm').addEventListener('submit', (e) => {
         date
     };
 
-    if (currentUser) {
-        db.collection('users').doc(currentUser.uid).collection('transactions').doc(tx.id).set(tx)
-            .then(() => {
-                // Save for next time
-                lastAddedTx = { type, paymentMethod, title, category };
-                
-                // Reset and close
-                e.target.reset();
-                document.getElementById('txId').value = '';
-                document.getElementById('date').valueAsDate = new Date(); // Reset to today
-                closeModal(transactionModal);
-            })
-            .catch(err => alert("Error saving transaction: " + err.message));
-    }
+    // Save for next time
+    lastAddedTx = { type, paymentMethod, title, category };
+    
+    // Reset and close immediately
+    e.target.reset();
+    document.getElementById('txId').value = '';
+    document.getElementById('date').valueAsDate = new Date(); // Reset to today
+    closeModal(transactionModal);
 
-    // Handled in Firestore callback above
+    if (txId) {
+        const idx = transactions.findIndex(t => t.id === txId);
+        if (idx !== -1) transactions[idx] = tx;
+    } else {
+        transactions.push(tx);
+    }
+    
+    localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+    sortTransactions();
+    lastUpdated = new Date().toLocaleString();
+    if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+
+    updateDashboard();
+    renderTransactions();
 });
 
 // Add Category Form
@@ -496,18 +326,21 @@ document.getElementById('addAccountForm').addEventListener('submit', (e) => {
     const input = document.getElementById('newAccountName');
     const newName = input.value.trim();
 
-    if (newName && currentUser) {
+    if (newName) {
         const newId = 'acc_' + Date.now();
         const acc = { id: newId, name: newName };
         
-        db.collection('users').doc(currentUser.uid).collection('accounts').doc(newId).set(acc)
-            .then(() => {
-                // Auto-switch to new account
-                activeAccountId = newId;
-                localStorage.setItem('expensebook_active_account', activeAccountId);
-                input.value = '';
-            })
-            .catch(err => alert("Error adding account: " + err.message));
+        accounts.push(acc);
+        localStorage.setItem('expensebook_accounts', JSON.stringify(accounts));
+        
+        activeAccountId = newId;
+        localStorage.setItem('expensebook_active_account', activeAccountId);
+        input.value = '';
+
+        populateAccountSelector();
+        renderAccountList();
+        updateDashboard();
+        renderTransactions();
     }
 });
 
@@ -583,13 +416,19 @@ function deleteTransaction(id) {
 }
 
 document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
-    if (transactionToDelete && currentUser) {
+    if (transactionToDelete) {
         const idToDelete = transactionToDelete;
         transactionToDelete = null;
         closeModal(deleteConfirmModal);
         
-        db.collection('users').doc(currentUser.uid).collection('transactions').doc(idToDelete).delete()
-            .catch(err => console.error("Error deleting transaction in background:", err));
+        transactions = transactions.filter(t => t.id !== idToDelete);
+        localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+        
+        lastUpdated = new Date().toLocaleString();
+        if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+        
+        updateDashboard();
+        renderTransactions();
     }
 });
 
@@ -600,6 +439,14 @@ function deleteCategory(cat) {
     populateCategoryDropdowns();
 }
 
+function saveNicknames() {
+    localStorage.setItem('expensebook_nicknames', JSON.stringify(nicknames));
+}
+
+function renderNicknameList() {
+    // Stub – not used in current UI
+}
+
 function deleteNickname(index) {
     nicknames.splice(index, 1);
     saveNicknames();
@@ -607,8 +454,13 @@ function deleteNickname(index) {
     renderTransactions();
 }
 
-function updateDashboard(filteredTransactions = transactions) {
-    const totals = filteredTransactions.reduce((acc, curr) => {
+function updateDashboard(filteredTransactions = null) {
+    // Default to all transactions for the active account
+    const source = filteredTransactions !== null
+        ? filteredTransactions
+        : transactions.filter(t => t.accountId === activeAccountId);
+
+    const totals = source.reduce((acc, curr) => {
         if (curr.type === 'income') {
             acc.income += curr.amount;
             acc.balance += curr.amount;
@@ -777,29 +629,72 @@ function renderAccountList() {
         div.style.background = 'var(--surface)';
 
         div.innerHTML = `
-            <span>${acc.name} ${acc.id === 'acc_default' ? '(Default)' : ''}</span>
-            <div>
-                <button class="icon-btn edit-btn" onclick="renameAccount('${acc.id}', '${acc.name}')"><i class="fa-solid fa-pen"></i></button>
-                <button class="icon-btn delete-btn" onclick="deleteAccount('${acc.id}')"><i class="fa-solid fa-trash"></i></button>
+            <span class="account-name-text" style="flex: 1; font-weight: 500;">${acc.name} ${acc.id === 'acc_default' ? '<span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.8;">(Default)</span>' : ''}</span>
+            <div class="account-actions" style="display: flex; gap: 8px; align-items: center;">
+                <button class="icon-btn edit-btn" title="Rename"><i class="fa-solid fa-pen"></i></button>
+                <button class="icon-btn delete-btn" title="Delete"><i class="fa-solid fa-trash"></i></button>
             </div>
         `;
+        
+        const editBtn = div.querySelector('.edit-btn');
+        const deleteBtn = div.querySelector('.delete-btn');
+        const nameSpan = div.querySelector('.account-name-text');
+        const actionsDiv = div.querySelector('.account-actions');
+        
+        editBtn.addEventListener('click', () => {
+            // Enter edit mode
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = acc.name;
+            input.className = 'select-input';
+            input.style.flex = '1';
+            input.style.marginRight = '8px';
+            input.style.padding = '6px 12px';
+            input.style.borderRadius = '8px';
+            input.style.background = 'var(--surface-hover)';
+            input.style.fontSize = '0.9rem';
+            
+            // Replace name span with input
+            div.replaceChild(input, nameSpan);
+            input.focus();
+            input.select();
+            
+            // Replace actions with save/cancel
+            actionsDiv.innerHTML = `
+                <button class="save-btn" title="Save" style="background:transparent; border:none; cursor:pointer; color:var(--income); font-size:1.1rem; padding:4px;"><i class="fa-solid fa-check"></i></button>
+                <button class="cancel-btn" title="Cancel" style="background:transparent; border:none; cursor:pointer; color:var(--text-secondary); font-size:1.1rem; padding:4px;"><i class="fa-solid fa-xmark"></i></button>
+            `;
+            
+            const saveBtn = actionsDiv.querySelector('.save-btn');
+            const cancelBtn = actionsDiv.querySelector('.cancel-btn');
+            
+            const performSave = () => {
+                const newName = input.value.trim();
+                if (!newName || newName === acc.name) {
+                    renderAccountList();
+                    return;
+                }
+                
+                // Update local cache, localStorage, and UI immediately
+                acc.name = newName;
+                localStorage.setItem('expensebook_accounts', JSON.stringify(accounts));
+                renderAccountList();
+                populateAccountSelector();
+            };
+            
+            saveBtn.addEventListener('click', performSave);
+            cancelBtn.addEventListener('click', () => renderAccountList());
+            
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') performSave();
+                if (e.key === 'Escape') renderAccountList();
+            });
+        });
+        
+        deleteBtn.addEventListener('click', () => deleteAccount(acc.id));
+        
         list.appendChild(div);
     });
-}
-
-async function renameAccount(id, currentName) {
-    if (!currentUser) return;
-    const newName = prompt("Enter new account name:", currentName);
-    if (!newName || newName.trim() === "" || newName === currentName) return;
-    
-    try {
-        await db.collection('users').doc(currentUser.uid).collection('accounts').doc(id).update({
-            name: newName.trim()
-        });
-        // The onSnapshot listener will automatically re-render the list and selector
-    } catch (err) {
-        alert("Error renaming account: " + err.message);
-    }
 }
 
 function populateAccountSelector() {
@@ -812,30 +707,43 @@ function populateAccountSelector() {
 }
 
 function deleteAccount(id) {
-    if (!currentUser) return;
-    if (confirm("Are you sure you want to delete this account? All associated transactions will be deleted.")) {
-        db.collection('users').doc(currentUser.uid).collection('accounts').doc(id).delete().then(() => {
-            // Delete associated transactions
-            const txsToDelete = transactions.filter(t => t.accountId === id);
-            txsToDelete.forEach(tx => {
-                db.collection('users').doc(currentUser.uid).collection('transactions').doc(tx.id).delete();
-            });
-            
-            // update active account if it was the deleted one
-            if (activeAccountId === id) {
-                activeAccountId = accounts.length > 1 ? accounts.find(a => a.id !== id).id : 'acc_default';
-                if(accounts.length <= 1) {
-                    // Recreate default account if none left
-                    db.collection('users').doc(currentUser.uid).collection('accounts').doc('acc_default').set({
-                        id: 'acc_default',
-                        name: 'Personal'
-                    });
-                }
-            }
-            renderTransactions();
-        }).catch(err => alert("Error deleting account: " + err.message));
+    // Check if they are trying to delete the only account
+    if (accounts.length <= 1) {
+        alert("You cannot delete the only remaining account. Create another account first.");
+        return;
     }
+    
+    accountToDelete = id;
+    openModal(deleteAccountConfirmModal);
 }
+
+document.getElementById('confirmDeleteAccountBtn').addEventListener('click', () => {
+    if (accountToDelete) {
+        const id = accountToDelete;
+        accountToDelete = null;
+        closeModal(deleteAccountConfirmModal);
+        
+        // Remove associated transactions locally
+        transactions = transactions.filter(t => t.accountId !== id);
+        localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+        
+        // Remove from local accounts array
+        accounts = accounts.filter(a => a.id !== id);
+        localStorage.setItem('expensebook_accounts', JSON.stringify(accounts));
+        
+        // Update active account locally if it was the deleted one
+        if (activeAccountId === id) {
+            activeAccountId = accounts[0].id;
+            localStorage.setItem('expensebook_active_account', activeAccountId);
+        }
+        
+        // Refresh UI immediately
+        populateAccountSelector();
+        renderAccountList();
+        updateDashboard();
+        renderTransactions();
+    }
+});
 
 function populateCategoryDropdowns() {
     const formSelect = document.getElementById('category');
@@ -1177,8 +1085,8 @@ document.getElementById('excelFileInput').addEventListener('change', async funct
                 processImportedTransactions(parsedTxs, file);
             }
         } catch (error) {
-            console.error(error);
-            alert("Error parsing PDF file.");
+            console.error("PDF parse error:", error);
+            alert("Error parsing PDF file: " + error.message);
         }
         e.target.value = '';
         return;
@@ -1324,7 +1232,11 @@ async function parseCanaraBankPDF(file) {
         reader.onload = async function(e) {
             try {
                 const typedarray = new Uint8Array(e.target.result);
-                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                // Ensure worker is configured
+                if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                }
+                const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
                 let fullText = "";
                 
                 for (let i = 1; i <= pdf.numPages; i++) {
@@ -1345,12 +1257,47 @@ async function parseCanaraBankPDF(file) {
                 const parsedTxs = [];
                 const lines = fullText.split('\n');
                 
+                // Track running balance to mathematically determine transaction type (income/expense)
+                let lastRunningBalance = null;
+                
+                // Find Opening Balance
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line.toLowerCase().includes('opening balance')) {
+                        const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
+                        if (amounts && amounts.length > 0) {
+                            lastRunningBalance = parseFloat(amounts[amounts.length - 1].replace(/[^0-9.]/g, ''));
+                            break;
+                        }
+                    }
+                }
+                
                 const finalizeTx = (tx) => {
                     tx.narration = tx.narration.trim();
                     let type = 'expense';
-                    if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr')) {
-                        type = 'income';
+                    
+                    if (lastRunningBalance !== null && tx.runningBalance !== null) {
+                        const diff = tx.runningBalance - lastRunningBalance;
+                        if (Math.abs(diff - tx.amount) < 0.02) {
+                            type = 'income';
+                        } else if (Math.abs(diff + tx.amount) < 0.02) {
+                            type = 'expense';
+                        } else {
+                            // Fallback
+                            if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
+                                type = 'income';
+                            }
+                        }
+                        lastRunningBalance = tx.runningBalance;
+                    } else {
+                        if (tx.narration.includes('/CR/') || tx.narration.includes('SBINT') || tx.narration.includes('CREDIT') || tx.narration.includes('DEPOSIT') || tx.narration.includes('Cr') || tx.narration.includes('/REF/')) {
+                            type = 'income';
+                        }
+                        if (tx.runningBalance !== null) {
+                            lastRunningBalance = tx.runningBalance;
+                        }
                     }
+                    
                     const dParts = tx.dateStr.split('-');
                     if (dParts.length === 3) {
                         const isoDate = `${dParts[2]}-${dParts[1]}-${dParts[0]}`;
@@ -1362,23 +1309,22 @@ async function parseCanaraBankPDF(file) {
                     let line = lines[i].trim();
                     if (!line || line.includes('PAGE BREAK') || line.includes('Closing Balance')) continue;
                     
-                    // Remove all spaces for date matching to combat kerning issues
                     const cleanLine = line.replace(/\s+/g, '');
 
                     if (/^\d{2}-\d{2}-\d{4}$/.test(cleanLine)) {
                         if (currentTx && currentTx.amount > 0) finalizeTx(currentTx);
-                        currentTx = { dateStr: cleanLine, narration: "", amount: 0 };
+                        currentTx = { dateStr: cleanLine, narration: "", amount: 0, runningBalance: null };
                         continue;
                     }
 
                     if (currentTx) {
-                        // Try to match amounts at the end of the line
-                        // Often pdf.js concatenates columns like "100.00 5,000.00"
                         const amounts = line.match(/(?:Rs\.|₹|INR)?\s*[\d,]+\.\d{2}/gi);
                         if (amounts && amounts.length >= 2 && !line.includes('Balance')) {
-                            // The second to last amount is the transaction amount. The last is the running balance.
                             const txAmtStr = amounts[amounts.length - 2].replace(/[^0-9.]/g, '');
                             currentTx.amount = parseFloat(txAmtStr);
+                            
+                            const runningBalStr = amounts[amounts.length - 1].replace(/[^0-9.]/g, '');
+                            currentTx.runningBalance = parseFloat(runningBalStr);
                             
                             const txAmtRaw = amounts[amounts.length - 2];
                             const lastAmtIndex = line.lastIndexOf(txAmtRaw);
@@ -1411,9 +1357,8 @@ async function parseCanaraBankPDF(file) {
     });
 }
 
-// Deduplication and Firebase Upload Logic
+// Deduplication and Local Save Logic
 function processImportedTransactions(parsedTxs, fileObj) {
-    if (!currentUser) return;
     
     if (!categories.includes('Uncategorized')) {
         categories.push('Uncategorized');
@@ -1423,15 +1368,14 @@ function processImportedTransactions(parsedTxs, fileObj) {
 
     let importedCount = 0;
     let skippedCount = 0;
-    const batch = db.batch();
-    
     parsedTxs.forEach(tx => {
         const isDuplicate = transactions.some(existing => {
+            const sameAccount = existing.accountId === activeAccountId;
             const sameDate = existing.date === tx.date;
             const sameAmount = Math.abs(existing.amount - tx.amount) < 0.01;
             const existingTitle = existing.originalTitle || existing.title;
             const sameTitle = existingTitle.toLowerCase().trim() === tx.title.toLowerCase().trim();
-            return sameDate && sameAmount && sameTitle;
+            return sameAccount && sameDate && sameAmount && sameTitle;
         });
         
         if (isDuplicate) {
@@ -1449,43 +1393,106 @@ function processImportedTransactions(parsedTxs, fileObj) {
                 category: 'Uncategorized',
                 date: tx.date
             };
-            batch.set(db.collection('users').doc(currentUser.uid).collection('transactions').doc(newId), newTx);
+            transactions.push(newTx);
             importedCount++;
         }
     });
     
+    // Show summary modal and save to history immediately
+    const summaryModal = document.getElementById('importSummaryModal');
     if (importedCount > 0) {
-        batch.commit().then(() => {
-            const summaryModal = document.getElementById('importSummaryModal');
-            document.getElementById('importSummaryMsg').innerText = `Successfully added ${importedCount} new transactions. Skipped ${skippedCount} duplicates.`;
-            openModal(summaryModal);
-            uploadFileToHistory(fileObj);
-        }).catch(err => alert("Error importing: " + err.message));
+        document.getElementById('importSummaryMsg').innerText = `Successfully added ${importedCount} new transactions. Skipped ${skippedCount} duplicates.`;
+        openModal(summaryModal);
+        
+        localStorage.setItem('expensebook_transactions', JSON.stringify(transactions));
+        sortTransactions();
+        lastUpdated = new Date().toLocaleString();
+        if (lastUpdatedEl) lastUpdatedEl.innerText = `Last updated on: ${lastUpdated}`;
+        
+        updateDashboard();
+        renderTransactions();
+        uploadFileToHistory(fileObj);
     } else {
-        const summaryModal = document.getElementById('importSummaryModal');
         document.getElementById('importSummaryMsg').innerText = `No new transactions added. Skipped ${skippedCount} duplicates.`;
         openModal(summaryModal);
         uploadFileToHistory(fileObj);
     }
 }
 
-function uploadFileToHistory(file) {
-    if (!currentUser || !file) return;
-    const storageRef = firebase.storage().ref();
-    const timestamp = Date.now();
-    const fileRef = storageRef.child(`users/${currentUser.uid}/imports/${timestamp}_${file.name}`);
-    
-    console.log("Uploading file to history...");
-    fileRef.put(file).then((snapshot) => {
-        return snapshot.ref.getDownloadURL();
-    }).then((url) => {
-        const historyDoc = {
-            fileName: file.name,
-            timestamp: timestamp,
-            url: url
+// Local Database for files (IndexedDB) to keep storage free
+function getFileStore() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open("ExpenseBookOfflineFiles", 1);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains("files")) {
+                db.createObjectStore("files", { keyPath: "id" });
+            }
         };
-        db.collection('users').doc(currentUser.uid).collection('importHistory').add(historyDoc);
-    }).catch(err => console.error("Error uploading file:", err));
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror = (e) => reject(e.target.error);
+    });
+}
+
+function saveFileLocally(id, fileBlob) {
+    return getFileStore().then(db => {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("files", "readwrite");
+            const store = tx.objectStore("files");
+            store.put({ id: id, blob: fileBlob });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    });
+}
+
+function getFileLocally(id) {
+    return getFileStore().then(db => {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("files", "readonly");
+            const store = tx.objectStore("files");
+            const req = store.get(id);
+            req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+            req.onerror = () => reject(req.error);
+        });
+    });
+}
+
+function deleteFileLocally(id) {
+    return getFileStore().then(db => {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("files", "readwrite");
+            const store = tx.objectStore("files");
+            store.delete(id);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    });
+}
+
+function uploadFileToHistory(file) {
+    if (!file) return;
+    const timestamp = Date.now();
+    const docId = 'hist_' + timestamp;
+    
+    const historyDoc = {
+        id: docId,
+        fileName: file.name,
+        timestamp: timestamp,
+        url: null
+    };
+    
+    saveFileLocally(docId, file)
+        .then(() => {
+            importHistory.unshift(historyDoc);
+            localStorage.setItem('expensebook_import_history', JSON.stringify(importHistory));
+            
+            const historyModal = document.getElementById('importHistoryModal');
+            if (historyModal && !historyModal.classList.contains('hidden')) {
+                renderImportHistory();
+            }
+        })
+        .catch(err => console.error("Error saving import history:", err));
 }
 
 function renderImportHistory() {
@@ -1512,19 +1519,50 @@ function renderImportHistory() {
                     <span style="font-size:0.75rem; color:var(--text-secondary);">${dateStr}</span>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <a href="${item.url}" target="_blank" class="icon-btn" title="View/Download" style="text-decoration:none;"><i class="fa-solid fa-download"></i></a>
+                    <button class="icon-btn download-btn" title="View/Download"><i class="fa-solid fa-download"></i></button>
                     <button class="icon-btn delete-btn" onclick="deleteImportHistoryItem('${item.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
                 </div>
             `;
+            
+            // Add download click listener
+            const downloadBtn = li.querySelector('.download-btn');
+            downloadBtn.addEventListener('click', async () => {
+                if (item.url) {
+                    window.open(item.url, '_blank');
+                } else {
+                    try {
+                        const blob = await getFileLocally(item.id);
+                        if (blob) {
+                            const localUrl = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = localUrl;
+                            a.download = item.fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(localUrl);
+                        } else {
+                            alert("This file is stored in the database but the local copy was not found on this device.");
+                        }
+                    } catch (err) {
+                        console.error("Error downloading local file:", err);
+                        alert("Error loading local file.");
+                    }
+                }
+            });
+            
             list.appendChild(li);
         });
     }
 }
 
 function deleteImportHistoryItem(id) {
-    if (!currentUser) return;
-    db.collection('users').doc(currentUser.uid).collection('importHistory').doc(id).delete()
-        .catch(err => console.error("Error deleting import history:", err));
+    deleteFileLocally(id).catch(err => console.error("Error deleting local file:", err));
+    
+    importHistory = importHistory.filter(item => item.id !== id);
+    localStorage.setItem('expensebook_import_history', JSON.stringify(importHistory));
+    
+    renderImportHistory();
 }
 
 // Start

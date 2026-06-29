@@ -90,6 +90,7 @@ body {
 .header-actions {
     display: flex;
     gap: 12px;
+    align-items: center;
 }
 
 .icon-btn {
@@ -261,6 +262,12 @@ body {
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f8fafc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
 }
 
+input[type="text"].select-input, input[type="date"].select-input {
+    background-image: none !important;
+    padding-right: 16px;
+    cursor: text;
+}
+
 .select-input::placeholder {
     color: var(--text-secondary);
 }
@@ -303,14 +310,6 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     cursor: pointer;
-}
-#multiSelectHeader::after {
-    content: '\f078';
-    font-family: "Font Awesome 6 Free";
-    font-weight: 900;
-    margin-left: 8px;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
 }
 
 .multi-select-dropdown {
@@ -830,7 +829,28 @@ input[id="typeIncome"]:checked + label { color: var(--income); border-color: rgb
 .dropdown-container { position: relative; display: inline-block; }
 .dropdown-content { position: absolute; right: 0; top: 120%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; box-shadow: var(--shadow-lg); z-index: 100; min-width: 160px; opacity: 1; transition: opacity 0.2s ease, transform 0.2s ease; transform: translateY(0); }
 .dropdown-content.hidden { display: none !important; opacity: 0; transform: translateY(-10px); pointer-events: none; }
-.dropdown-content .btn { background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.75rem 1rem; font-weight: 500; font-size: 0.95rem; border-radius: 8px; width: 100%; transition: background 0.2s; }
+.dropdown-content .btn {
+    background: transparent;
+    color: var(--text-primary);
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    padding: 0.6rem 0.8rem !important;
+    font-weight: 500 !important;
+    font-size: 0.95rem !important;
+    border-radius: 8px;
+    width: 100%;
+    transition: background 0.2s;
+    text-align: left !important;
+}
 .dropdown-content .btn:hover { background: var(--bg-color); }
-.dropdown-content .btn i { width: 24px; color: var(--text-secondary); text-align: center; }
+.dropdown-content .btn i { width: 20px; color: var(--text-secondary); text-align: center; margin-right: 4px; }
 
+
+/* Option styles for dropdowns to respect theme colors */
+select option,
+#accountSelector option {
+    background-color: var(--surface) !important;
+    color: var(--text-primary) !important;
+}

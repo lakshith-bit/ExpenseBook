@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="index.css?v=2">
+    <link rel="stylesheet" href="index.css?v=5">
     <!-- Chart.js for Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- jsPDF for Excel-style Export -->
@@ -20,69 +21,59 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 </head>
+
 <body>
-    <!-- Login Overlay -->
-    <div id="loginOverlay" style="display: flex; position: fixed; inset: 0; background: var(--bg-color, #0f172a); z-index: 9999; align-items: center; justify-content: center; flex-direction: column; color: white;">
-        <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">ExpenseBook</h1>
-        <p style="margin-bottom: 2rem; color: #94a3b8;">Securely sign in to sync your ledger</p>
-        
-        <div id="phoneAuthContainer" style="display: flex; flex-direction: column; gap: 1rem; width: 100%; max-width: 300px; margin: 0 auto;">
-            <div style="display: flex; gap: 0.5rem;">
-                <input type="text" id="countryCodeInput" value="+91" style="width: 60px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-size: 1rem; text-align: center;" placeholder="+91">
-                <input type="tel" id="phoneNumberInput" placeholder="Phone Number" style="flex: 1; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-size: 1rem;">
-            </div>
-            
-            <div id="recaptcha-container" style="display: flex; justify-content: center;"></div>
-            
-            <button id="sendOtpBtn" disabled style="padding: 0.75rem 1.5rem; border-radius: 8px; border: none; background: var(--primary); color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: 0.2s; opacity: 0.7;">
-                Send OTP
-            </button>
-        </div>
-
-        <div id="otpAuthContainer" style="display: none; flex-direction: column; gap: 1rem; width: 100%; max-width: 300px; margin: 0 auto;">
-            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0;">Enter the 6-digit code sent to your phone</p>
-            <input type="text" id="otpInput" placeholder="Enter OTP" style="padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-size: 1rem; letter-spacing: 2px; text-align: center;">
-            <button id="verifyOtpBtn" style="padding: 0.75rem 1.5rem; border-radius: 8px; border: none; background: var(--primary); color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: 0.2s;">
-                Verify & Sign In
-            </button>
-            <button id="backToPhoneBtn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; text-decoration: underline; font-size: 0.9rem;">Wrong number?</button>
-        </div>
-    </div>
-
-    <div class="app-container" id="mainApp" style="display: none;">
+    <div class="app-container" id="mainApp">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
                 <h1>ExpenseBook</h1>
-                  <div class="header-actions">
-                      <div class="dropdown-container" style="position: relative;">
-                          <button id="menuDropdownBtn" class="icon-btn" title="Menu" onclick="document.getElementById('menuDropdown').classList.toggle('hidden')"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-                          <div id="menuDropdown" class="dropdown-content hidden" style="position: absolute; right: 0; top: 120%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; box-shadow: var(--shadow-lg); z-index: 100; min-width: 150px;">
-                              <button id="importExcelBtn" class="btn" style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-file-import" style="width: 20px;"></i> Import</button>
-                              <button id="importHistoryBtn" class="btn" style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-clock-rotate-left" style="width: 20px;"></i> History</button>
-                              <button id="manageCategoriesBtn" class="btn" style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-tags" style="width: 20px;"></i> Categories</button>
-                              <button id="exportPdfBtn" class="btn" style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-file-pdf" style="width: 20px;"></i> Export PDF</button>
-                              <hr style="border: none; border-top: 1px solid var(--border); margin: 0.25rem 0;">
-                              <button id="themeToggleBtn" class="btn" style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-moon" style="width: 20px;"></i> Toggle Theme</button>
-                              <button id="logoutBtn" class="btn" style="background: transparent; color: #ef4444; justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i class="fa-solid fa-right-from-bracket" style="width: 20px;"></i> Log Out</button>
-                          </div>
-                      </div>
-                      <input type="file" id="excelFileInput" accept=".xls,.xlsx,.csv,.pdf" style="display: none;">
-                  </div>
+                <div class="header-actions">
+                    <div class="account-selector-header-container"
+                        style="display: flex; align-items: center; gap: 0.4rem; position: relative; background: var(--surface); padding: 0.4rem 0.8rem; border-radius: 10px; border: 1px solid var(--border); min-width: 140px; max-width: 220px; box-sizing: border-box;">
+                        <i class="fa-solid fa-wallet" style="color: var(--primary); font-size: 0.85rem;"></i>
+                        <select id="accountSelector"
+                            style="border: none; background: transparent; color: var(--text-primary); font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.9rem; padding: 0.1rem 1.2rem 0.1rem 0; flex: 1; outline: none; appearance: none; -webkit-appearance: none; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; width: 100%;">
+                            <!-- Accounts injected by JS -->
+                        </select>
+                        <i class="fa-solid fa-chevron-down"
+                            style="position: absolute; right: 8px; font-size: 0.65rem; color: var(--text-secondary); pointer-events: none;"></i>
+                    </div>
+                    <div class="dropdown-container" style="position: relative;">
+                        <button id="menuDropdownBtn" class="icon-btn" title="Menu"
+                            onclick="document.getElementById('menuDropdown').classList.toggle('hidden')"><i
+                                class="fa-solid fa-ellipsis-vertical"></i></button>
+                        <div id="menuDropdown" class="dropdown-content hidden"
+                            style="position: absolute; right: 0; top: 120%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; box-shadow: var(--shadow-lg); z-index: 100; min-width: 180px;">
+                            <button id="importExcelBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-file-import" style="width: 20px;"></i> Import PDF/XLS</button>
+                            <button id="importHistoryBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-clock-rotate-left" style="width: 20px;"></i> Import
+                                History</button>
+                            <button id="manageCategoriesBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-tags" style="width: 20px;"></i> My Categories</button>
+                            <button id="manageAccountsBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-gear" style="width: 20px;"></i> My Accounts</button>
+                            <button id="exportPdfBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-file-pdf" style="width: 20px;"></i> Export as PDF</button>
+                            <hr style="border: none; border-top: 1px solid var(--border); margin: 0.25rem 0;">
+                            <button id="themeToggleBtn" class="btn"
+                                style="background: transparent; color: var(--text-primary); justify-content: flex-start; padding: 0.5rem; font-weight: normal;"><i
+                                    class="fa-solid fa-moon" style="width: 20px;"></i> Theme</button>
+                        </div>
+                    </div>
+                    <input type="file" id="excelFileInput" accept=".xls,.xlsx,.csv,.pdf" style="display: none;">
+                </div>
             </div>
         </header>
 
         <!-- Dashboard / Summary Cards -->
         <section class="dashboard">
-            <div class="account-selector-wrapper" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding: 0.5rem; background: var(--surface); border-radius: 12px; box-shadow: 0 2px 8px var(--shadow);">
-                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
-                    <i class="fa-solid fa-wallet" style="color: var(--primary);"></i>
-                    <select id="accountSelector" class="select-input" style="border: none; background: transparent; font-weight: 600; font-size: 1.1rem; padding: 0.25rem; flex: 1; outline: none;">
-                        <!-- Accounts injected by JS -->
-                    </select>
-                </div>
-                <button id="manageAccountsBtn" class="icon-btn small-btn" title="Manage Accounts"><i class="fa-solid fa-gear"></i></button>
-            </div>
             <p id="lastUpdatedText" class="last-updated">Last updated on: -</p>
             <div class="card balance-card">
                 <h3>Total Balance</h3>
@@ -118,7 +109,7 @@
             <div class="section-header">
                 <div class="filter-group">
                     <input type="text" id="filterSearch" class="select-input" placeholder="Search...">
-                    
+
                     <div class="custom-multi-select" id="multiSelectContainer">
                         <div class="select-input" id="multiSelectHeader">All Categories</div>
                         <div class="multi-select-dropdown hidden" id="multiSelectDropdown">
@@ -126,9 +117,13 @@
                         </div>
                     </div>
 
-                    <input type="text" id="filterStartDate" class="select-input" placeholder="Start Date" onclick="this.type='date'; if(this.showPicker) this.showPicker();" onblur="(this.value == '' ? this.type='text' : this.type='date')">
-                    <input type="text" id="filterEndDate" class="select-input" placeholder="End Date" onclick="this.type='date'; if(this.showPicker) this.showPicker();" onblur="(this.value == '' ? this.type='text' : this.type='date')">
-                    
+                    <input type="text" id="filterStartDate" class="select-input" placeholder="Start Date"
+                        onclick="this.type='date'; if(this.showPicker) this.showPicker();"
+                        onblur="(this.value == '' ? this.type='text' : this.type='date')">
+                    <input type="text" id="filterEndDate" class="select-input" placeholder="End Date"
+                        onclick="this.type='date'; if(this.showPicker) this.showPicker();"
+                        onblur="(this.value == '' ? this.type='text' : this.type='date')">
+
                     <select id="filterTxType" class="select-input" title="Transaction Type">
                         <option value="all">All Types</option>
                         <option value="income">Amount Received</option>
@@ -152,8 +147,10 @@
             <!-- Chart View -->
             <div id="chartTab" class="tab-content">
                 <div class="card chart-card" id="chartContainer" style="display: none;">
-                    <div id="noChartDataMsg" style="display: none; text-align: center; color: var(--text-secondary); padding: 3rem 0;">
-                        <i class="fa-solid fa-chart-pie" style="font-size: 3rem; opacity: 0.2; margin-bottom: 1rem; display: block;"></i>
+                    <div id="noChartDataMsg"
+                        style="display: none; text-align: center; color: var(--text-secondary); padding: 3rem 0;">
+                        <i class="fa-solid fa-chart-pie"
+                            style="font-size: 3rem; opacity: 0.2; margin-bottom: 1rem; display: block;"></i>
                         <p>No transactions available for the selected filters.</p>
                     </div>
                     <canvas id="expenseChart" height="300"></canvas>
@@ -259,10 +256,36 @@
                 <button class="icon-btn" data-close="deleteConfirmModal"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
-                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Are you sure you want to delete this transaction? This action cannot be undone.</p>
+                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Are you sure you want to delete this
+                    transaction? This action cannot be undone.</p>
                 <div style="display: flex; justify-content: flex-end; gap: 1rem;">
-                    <button type="button" class="btn" style="background: var(--surface); border: 1px solid var(--border);" data-close="deleteConfirmModal">Cancel</button>
-                    <button type="button" class="btn" id="confirmDeleteBtn" style="background: #ef4444; color: white;">Delete</button>
+                    <button type="button" class="btn"
+                        style="background: var(--surface); border: 1px solid var(--border);"
+                        data-close="deleteConfirmModal">Cancel</button>
+                    <button type="button" class="btn" id="confirmDeleteBtn"
+                        style="background: #ef4444; color: white;">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Account Confirmation Modal -->
+    <div class="modal-overlay hidden" id="deleteAccountConfirmModal">
+        <div class="modal" style="max-width: 400px; margin: auto;">
+            <div class="modal-header">
+                <h2>Delete Account</h2>
+                <button class="icon-btn" data-close="deleteAccountConfirmModal"><i
+                        class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Are you sure you want to delete this
+                    account? All associated transactions will be deleted. This action cannot be undone.</p>
+                <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn"
+                        style="background: var(--surface); border: 1px solid var(--border);"
+                        data-close="deleteAccountConfirmModal">Cancel</button>
+                    <button type="button" class="btn" id="confirmDeleteAccountBtn"
+                        style="background: #ef4444; color: white;">Delete</button>
                 </div>
             </div>
         </div>
@@ -292,7 +315,8 @@
         <div class="modal" style="max-width: 400px; margin: auto; text-align: center;">
             <div class="modal-header" style="justify-content: center; position: relative;">
                 <h2 style="text-align: center; width: 100%;">Import Summary</h2>
-                <button class="icon-btn" data-close="importSummaryModal" style="position: absolute; right: 0;"><i class="fa-solid fa-times"></i></button>
+                <button class="icon-btn" data-close="importSummaryModal" style="position: absolute; right: 0;"><i
+                        class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
                 <div style="font-size: 3rem; color: var(--primary); margin-bottom: 1rem;">
@@ -300,18 +324,14 @@
                 </div>
                 <h3 style="margin-bottom: 0.5rem;">Import Complete</h3>
                 <p id="importSummaryMsg" style="color: var(--text-secondary); margin-bottom: 1.5rem;"></p>
-                <button type="button" class="btn btn-primary" style="width: 100%; justify-content: center;" data-close="importSummaryModal">Got it</button>
+                <button type="button" class="btn btn-primary" style="width: 100%; justify-content: center;"
+                    data-close="importSummaryModal">Got it</button>
             </div>
         </div>
     </div>
     </div>
 
-    <!-- Firebase SDKs (Compat) -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=10"></script>
 </body>
+
 </html>
